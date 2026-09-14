@@ -1,0 +1,11 @@
+# Dependencias reales de CogniMorph (app.py + tutor_core.py) — recorté las que venían en el
+# requirements.txt original (gradio, openai, langchain, python-dotenv, tiktoken, python-docx,
+# pandas, numpy, plotly) porque no las usa ningún import del código: no aportan nada a la app y
+# solo alargan y arriesgan el build en el hosting gratuito.
+streamlit>=1.35.0
+google-genai>=0.7.0
+pydantic>=2.7.0
+requests>=2.32.0
+pypdf>=4.2.0
+reportlab>=4.2.0
+Pillow>=10.0.0
