@@ -1,0 +1,243 @@
+{
+  "meta": {
+    "asignatura": "MYF205",
+    "nombre_asignatura": "Anatomía de Cabeza y Cuello",
+    "periodo": "202620",
+    "titulo_original": "CRONOGRAMA ABREVIADO MYF205 202620",
+    "leyenda": "T/P = Teoría (cátedra) / Práctico (taller). 'hito' = evaluación o entregable puntual de esa sesión de taller (Ejercicios EJ, avances de póster, etc.), tal como aparece en el documento original. CÁTEDRA/EPOE = evaluaciones acumulativas de teoría/práctico.",
+    "fuente_original": "Cronograma_MYF205_202620.pdf",
+    "advertencias": [
+      "El día 6 dice 'EPEOE 1' en el documento original, distinto de 'EPOE 2'/'EPOE 3' de otras semanas. Revisado con el docente: se mantiene tal cual (no se corrige)."
+    ]
+  },
+  "dias": [
+    {
+      "dia": 1,
+      "fecha": "03-08-2026",
+      "catedra": {
+        "actividad": "Clase",
+        "contenido": "Presentación del curso / U1:C1: Osteología y artrología del neurocráneo"
+      },
+      "taller": {
+        "actividad": "Taller",
+        "contenido": "U1:T1: Osteología y artrología del neurocráneo"
+      }
+    },
+    {
+      "dia": 2,
+      "fecha": "10-08-2026",
+      "catedra": {
+        "actividad": "Clase",
+        "contenido": "U1:C2: Osteología y artrología del viscerocráneo"
+      },
+      "taller": {
+        "actividad": "Taller",
+        "contenido": "U1:T2: Osteología y artrología del viscerocráneo"
+      }
+    },
+    {
+      "dia": 3,
+      "fecha": "17-08-2026",
+      "catedra": {
+        "actividad": "Clase",
+        "contenido": "U2:C3: Cavidad Oral"
+      },
+      "taller": {
+        "actividad": "Taller",
+        "contenido": "U2:T3: Cavidad Oral",
+        "hito": "EJ1: MiniEpoe Neurocráneo"
+      }
+    },
+    {
+      "dia": 4,
+      "fecha": "24-08-2026",
+      "catedra": {
+        "actividad": "Clase",
+        "contenido": "U2:C4: Nasal y Fosas"
+      },
+      "taller": {
+        "actividad": "Taller",
+        "contenido": "U2:T4: Nasal y Fosas"
+      }
+    },
+    {
+      "dia": 5,
+      "fecha": "31-08-2026",
+      "catedra": {
+        "actividad": null,
+        "contenido": "U3:C5: Miología de Cabeza"
+      },
+      "taller": {
+        "actividad": null,
+        "contenido": "U3:T5: Miología de Cabeza"
+      }
+    },
+    {
+      "dia": 6,
+      "fecha": "07-09-2026",
+      "catedra": {
+        "actividad": "Clase",
+        "contenido": "CÁTEDRA 1"
+      },
+      "taller": {
+        "actividad": "Taller",
+        "contenido": "EPOE 1"
+      }
+    },
+    {
+      "dia": 7,
+      "fecha": "14-09-2026",
+      "catedra": {
+        "actividad": "Clase",
+        "contenido": "U4:C6: Neuroanatomía I"
+      },
+      "taller": {
+        "actividad": "Taller",
+        "contenido": "U4:T6: Neuroanatomía I"
+      }
+    },
+    {
+      "dia": 8,
+      "fecha": "21-09-2026",
+      "catedra": {
+        "actividad": "Clase",
+        "contenido": "U4:C7: Neuroanatomía II"
+      },
+      "taller": {
+        "actividad": "Taller",
+        "contenido": "U4:T7: Neuroanatomía II",
+        "hito": "EJ2: MiniEpoe Miología de Cabeza"
+      }
+    },
+    {
+      "dia": 9,
+      "fecha": "28-09-2026",
+      "catedra": {
+        "actividad": "Clase",
+        "contenido": "U4:C8: Aparato vestibulococlear"
+      },
+      "taller": {
+        "actividad": "Taller",
+        "contenido": "U4:T8: Aparato vestibulococlear"
+      }
+    },
+    {
+      "dia": 10,
+      "fecha": "05-10-2026",
+      "catedra": {
+        "actividad": "Clase",
+        "contenido": "U5:C9: Límites, fascias Osteología, artrología y miología cervical"
+      },
+      "taller": {
+        "actividad": "Taller",
+        "contenido": "U5:T9: Límites, fascias Osteología, artrología y miología cervical",
+        "hito": "Avance de Póster (Feed-Back)"
+      }
+    },
+    {
+      "dia": 11,
+      "fecha": "12-10-2026",
+      "catedra": {
+        "actividad": null,
+        "contenido": "CATEDRA 2"
+      },
+      "taller": {
+        "actividad": null,
+        "contenido": "EPOE 2"
+      }
+    },
+    {
+      "dia": 12,
+      "fecha": "19-10-2026",
+      "catedra": {
+        "actividad": "Clase",
+        "contenido": "SEMANA DE CONSOLIDACIÓN"
+      },
+      "taller": {
+        "actividad": "Taller",
+        "contenido": "SEMANA DE CONSOLIDACIÓN"
+      }
+    },
+    {
+      "dia": 13,
+      "fecha": "26-10-2026",
+      "catedra": {
+        "actividad": "Clase",
+        "contenido": "U5:C10: Faringe y Deglución"
+      },
+      "taller": {
+        "actividad": "Taller",
+        "contenido": "U5:T10: Faringe y Deglución",
+        "hito": "EJ4: Entrega de Póster"
+      }
+    },
+    {
+      "dia": 14,
+      "fecha": "02-11-2026",
+      "catedra": {
+        "actividad": "Clase",
+        "contenido": "U5:C11: Laringe"
+      },
+      "taller": {
+        "actividad": "Taller",
+        "contenido": "U5:T11: Laringe",
+        "hito": "EJ3: MiniEpoe Osteoartrología y miología cervical"
+      }
+    },
+    {
+      "dia": 15,
+      "fecha": "09-11-2026",
+      "catedra": {
+        "actividad": "Clase",
+        "contenido": "U6:C12: Anatomía y función ventilatoria"
+      },
+      "taller": {
+        "actividad": "Taller",
+        "contenido": "U6:T12: Anatomía y función ventilatoria"
+      }
+    },
+    {
+      "dia": 16,
+      "fecha": "16-11-2026",
+      "catedra": {
+        "actividad": "Clase",
+        "contenido": "Repaso e integración cátedra 3"
+      },
+      "taller": {
+        "actividad": "Taller",
+        "contenido": "Repaso e integración EPOE 3",
+        "hito": "EJ5: Presentación Póster (Presencial) / EPOE Formativo"
+      }
+    },
+    {
+      "dia": 17,
+      "fecha": "23-11-2026",
+      "catedra": {
+        "actividad": "Clase",
+        "contenido": "CATEDRA 3"
+      },
+      "taller": {
+        "actividad": "Taller",
+        "contenido": "EPOE 3"
+      }
+    },
+    {
+      "dia": 18,
+      "fecha": "30-11-2026",
+      "catedra": {
+        "actividad": null,
+        "contenido": "PRUEBA RECUPERATIVA (SUBIR NOTA)"
+      },
+      "taller": null
+    },
+    {
+      "dia": 19,
+      "fecha": "07-12-2026",
+      "catedra": {
+        "actividad": null,
+        "contenido": "EXAMEN FINAL"
+      },
+      "taller": null
+    }
+  ]
+}
