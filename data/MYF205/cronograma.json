@@ -1,0 +1,22 @@
+[
+    {
+        "evento": "Control 1: Osteología Craneal y Forámenes",
+        "fecha": "12 de Septiembre",
+        "ponderacion": "15%"
+    },
+    {
+        "evento": "Taller Práctico 1: Músculos Mímica y Masticación",
+        "fecha": "26 de Septiembre",
+        "ponderacion": "10%"
+    },
+    {
+        "evento": "Solemne 1: Pares Craneales V, VII y Vascularización",
+        "fecha": "10 de Octubre",
+        "ponderacion": "35%"
+    },
+    {
+        "evento": "Examen Final Integrado",
+        "fecha": "28 de Noviembre",
+        "ponderacion": "40%"
+    }
+]

@@ -1,0 +1,22 @@
+[
+    {
+        "evento": "Control 1: Homeostasis y Transporte de Membrana",
+        "fecha": "15 de Septiembre",
+        "ponderacion": "15%"
+    },
+    {
+        "evento": "Taller 1: Potencial de Acción y Sinapsis",
+        "fecha": "29 de Septiembre",
+        "ponderacion": "10%"
+    },
+    {
+        "evento": "Solemne 1: Fisiología Muscular y Cardiovascular",
+        "fecha": "14 de Octubre",
+        "ponderacion": "35%"
+    },
+    {
+        "evento": "Examen Final Integrado",
+        "fecha": "02 de Diciembre",
+        "ponderacion": "40%"
+    }
+]

@@ -1,0 +1,26 @@
+[
+    {
+        "id": "21045892",
+        "nombre": "Juan Pérez",
+        "carrera": "Licenciatura en Ciencias de la Actividad Física",
+        "promedio_previo": 3.6,
+        "riesgo": "ALTO",
+        "tema_debil": "Biofísica del Potencial de Acción y Bomba Na+/K+"
+    },
+    {
+        "id": "20874519",
+        "nombre": "Camila Soto",
+        "carrera": "Licenciatura en Ciencias de la Actividad Física",
+        "promedio_previo": 4.8,
+        "riesgo": "MEDIO",
+        "tema_debil": "Transmisión Sináptica y Neurotransmisores"
+    },
+    {
+        "id": "21980341",
+        "nombre": "María Silva",
+        "carrera": "Licenciatura en Ciencias de la Actividad Física",
+        "promedio_previo": 6.0,
+        "riesgo": "BAJO",
+        "tema_debil": "Ninguno"
+    }
+]

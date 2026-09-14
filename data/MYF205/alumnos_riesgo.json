@@ -1,0 +1,26 @@
+[
+    {
+        "id": "21045892",
+        "nombre": "Juan Pérez",
+        "carrera": "Fonoaudiología",
+        "promedio_previo": 3.4,
+        "riesgo": "ALTO",
+        "tema_debil": "Forámenes de la base del cráneo y Nervio Trigémino"
+    },
+    {
+        "id": "20874519",
+        "nombre": "Camila Soto",
+        "carrera": "Fonoaudiología",
+        "promedio_previo": 4.5,
+        "riesgo": "MEDIO",
+        "tema_debil": "Músculos suprahioideos e infrahioideos"
+    },
+    {
+        "id": "21980341",
+        "nombre": "María Silva",
+        "carrera": "Fonoaudiología",
+        "promedio_previo": 6.2,
+        "riesgo": "BAJO",
+        "tema_debil": "Ninguno"
+    }
+]
