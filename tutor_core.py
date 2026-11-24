@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import unicodedata
 from datetime import date, datetime, timedelta, timezone
 from typing import List, Optional
 
@@ -289,6 +290,253 @@ def _enriquecer_materiales(materiales, cronograma=None):
     return resumen
 
 
+# ---------------------------------------------------------------------------------------------
+# PRUEBAS: ALCANCE (clase / unidad) Y CANTIDAD DE PREGUNTAS — decididos en código, no por el modelo
+# ---------------------------------------------------------------------------------------------
+# Regla del profesor (no depende de que el modelo la recuerde):
+#   - Prueba de UNA clase:        10 preguntas de selección múltiple + 10 términos pareados.
+#   - Prueba de TODA la unidad:   24 de selección múltiple (repartidas por igual entre las clases
+#                                 de la unidad) + 10 términos pareados (con términos de todas las
+#                                 clases de la unidad).
+#   - Varias clases sueltas (ej. "clase 6 y 7") o una evaluación (ej. "CAT 2"): mismo formato que la
+#     unidad (24 + 10), repartido entre las clases involucradas.
+PREGUNTAS_PRUEBA_CLASE = 10
+PAREADOS_PRUEBA_CLASE = 10
+PREGUNTAS_PRUEBA_UNIDAD = 24
+PAREADOS_PRUEBA_UNIDAD = 10
+
+_ROMANOS = {"i": 1, "ii": 2, "iii": 3, "iv": 4, "v": 5, "vi": 6, "vii": 7, "viii": 8}
+
+# Palabras del pedido en sí (no del tema) que se ignoran al buscar de qué clase habla el estudiante.
+_PALABRAS_NO_TEMA = {
+    "control", "controles", "quiz", "prueba", "pruebas", "test", "evaluacion", "autoevaluacion",
+    "quiero", "quisiera", "hacer", "hazme", "dame", "armame", "arma", "realizar", "sobre", "para",
+    "esta", "este", "esto", "todo", "toda", "todos", "todas", "unidad", "unidades", "clase", "clases",
+    "vista", "visto", "vistas", "vistos", "ahora", "hasta", "tema", "temas", "una", "uno", "unos",
+    "unas", "del", "los", "las", "por", "favor", "porfa", "con", "que", "como", "mas", "pero", "algo",
+    "alguna", "alguno", "particular", "completa", "completo", "entera", "entero", "cual", "cuales",
+    "mejor", "gustaria", "puedes", "podrias", "podemos", "vamos", "dale", "ahi", "aqui",
+}
+
+
+def _norm(texto):
+    t = unicodedata.normalize("NFD", str(texto or "").lower())
+    return "".join(c for c in t if unicodedata.category(c) != "Mn")
+
+
+def _tallos(texto):
+    """Conjunto de 'raíces' (primeras 6 letras) de las palabras con contenido de un texto."""
+    out = set()
+    for w in re.findall(r"[a-z]{4,}", _norm(texto)):
+        if w in _PALABRAS_NO_TEMA:
+            continue
+        out.add(w[:6])
+    return out
+
+
+def estructura_unidades(cronograma):
+    """
+    Lee el cronograma (formato MYF205 con 'dias' o formato MYF2069 con 'semanas') y devuelve las
+    unidades con sus clases: [{'numero': 4, 'etiqueta': 'Unidad 4',
+    'clases': [{'n': 6, 'nombre': 'Neuroanatomía I'}, ...]}, ...]. Lista vacía si no se puede leer.
+    """
+    unidades = {}
+
+    def _agregar(u, n, nombre):
+        if u is None or n is None:
+            return
+        clases = unidades.setdefault(u, {})
+        clases.setdefault(n, (nombre or "").strip())
+
+    if isinstance(cronograma, dict) and isinstance(cronograma.get("dias"), list):
+        for dia in cronograma["dias"]:
+            cont = ((dia.get("catedra") or {}).get("contenido")) or ""
+            m = re.search(r"U\s*(\d+)\s*:\s*C\s*(\d+)\s*[:.]\s*(.+)", cont)
+            if m:
+                _agregar(int(m.group(1)), int(m.group(2)), m.group(3))
+    elif isinstance(cronograma, dict) and isinstance(cronograma.get("semanas"), list):
+        for sem in cronograma["semanas"]:
+            u_txt = str(sem.get("unidad") or "").strip().lower()
+            u = _ROMANOS.get(u_txt) or (int(u_txt) if u_txt.isdigit() else None)
+            for item in sem.get("catedra") or []:
+                m = re.match(r"^\s*C\s*(\d+)\s*[:.]\s*(.+)", str(item))
+                if m:
+                    _agregar(u, int(m.group(1)), m.group(2))
+
+    return [
+        {
+            "numero": u,
+            "etiqueta": f"Unidad {u}",
+            "clases": [{"n": n, "nombre": nom} for n, nom in sorted(unidades[u].items())],
+        }
+        for u in sorted(unidades)
+    ]
+
+
+def _todas_las_clases(unidades):
+    return [c for u in unidades for c in u["clases"]]
+
+
+def interpretar_alcance(texto, unidades):
+    """
+    A partir de lo que escribió el estudiante, decide el alcance de la prueba. Devuelve un dict:
+      {'modo': 'clase' | 'unidad' | 'varias' | 'ambiguo' | 'unidad_sin_numero' | 'indefinido',
+       'clases': [n, ...], 'unidad': numero|None, 'candidatas': [n, ...]}
+    No adivina: si no está claro (o hay empate entre clases), devuelve 'ambiguo'/'indefinido' para
+    que la app le pregunte al estudiante en vez de elegir por él.
+    """
+    vacio = {"modo": "indefinido", "clases": [], "unidad": None, "candidatas": []}
+    if not unidades:
+        return vacio
+    t = _norm(texto)
+    todas = _todas_las_clases(unidades)
+    numeros_validos = {c["n"] for c in todas}
+
+    # 1) "unidad 4" / "unidad IV"
+    m = re.search(r"\bunidad(?:es)?\s*(?:n[o°º]?\s*)?(\d+|[ivx]+)\b", t)
+    if m:
+        tok = m.group(1)
+        num = int(tok) if tok.isdigit() else _ROMANOS.get(tok)
+        for u in unidades:
+            if u["numero"] == num:
+                return {"modo": "unidad", "clases": [c["n"] for c in u["clases"]], "unidad": num, "candidatas": []}
+        return {"modo": "ambiguo", "clases": [], "unidad": None, "candidatas": []}
+
+    # 2) "clase 6", "clases 6 y 7", "hito 6", "c6"
+    nums = []
+    for g in re.finditer(r"\b(?:clases?|hitos?|c)\s*(?:n[o°º]?\s*)?((?:\d{1,2}\s*(?:,|y|e|-|a)?\s*)+)", t):
+        nums += [int(x) for x in re.findall(r"\d{1,2}", g.group(1))]
+    nums = [n for n in dict.fromkeys(nums) if n in numeros_validos]
+    if len(nums) == 1:
+        return {"modo": "clase", "clases": nums, "unidad": None, "candidatas": []}
+    if len(nums) >= 2:
+        return {"modo": "varias", "clases": sorted(nums), "unidad": None, "candidatas": []}
+
+    # 3) "la unidad" / "toda la unidad" sin número
+    if re.search(r"\bunidad(?:es)?\b", t):
+        return {"modo": "unidad_sin_numero", "clases": [], "unidad": None, "candidatas": []}
+
+    # 4) por nombre de clase ("cavidad nasal", "laringe", "fisiología renal")
+    palabras = _tallos(texto)
+    if palabras:
+        puntajes = {c["n"]: len(palabras & _tallos(c["nombre"])) for c in todas}
+        mejor = max(puntajes.values())
+        if mejor > 0:
+            ganadoras = sorted(n for n, p in puntajes.items() if p == mejor)
+            if len(ganadoras) == 1:
+                return {"modo": "clase", "clases": ganadoras, "unidad": None, "candidatas": []}
+            return {"modo": "ambiguo", "clases": [], "unidad": None, "candidatas": ganadoras}
+    return vacio
+
+
+def clases_de_evaluacion(entrada_evaluacion, unidades):
+    """
+    Dada una entrada de contenidos_evaluaciones.json (ej. CAT 2 → 'U4: C6: Neuroanatomía I', ...),
+    devuelve los números de clase involucrados (por 'C6' explícito o, si no, por nombre de clase).
+    """
+    todas = _todas_las_clases(unidades)
+    validos = {c["n"] for c in todas}
+    encontradas = []
+    for item in (entrada_evaluacion or {}).get("contenidos", []) or []:
+        m = re.search(r"\bC\s*(\d+)\b", str(item))
+        if m and int(m.group(1)) in validos:
+            encontradas.append(int(m.group(1)))
+            continue
+        palabras = _tallos(item)
+        if palabras:
+            puntajes = {c["n"]: len(palabras & _tallos(c["nombre"])) for c in todas}
+            mejor = max(puntajes.values())
+            ganadoras = [n for n, p in puntajes.items() if p == mejor]
+            if mejor > 0 and len(ganadoras) == 1:
+                encontradas.append(ganadoras[0])
+    return sorted(dict.fromkeys(encontradas))
+
+
+def _repartir(total, partes):
+    """Reparte 'total' en 'partes' lo más parejo posible (el resto va a las primeras)."""
+    base, resto = divmod(total, partes)
+    return [base + (1 if i < resto else 0) for i in range(partes)]
+
+
+def plan_control(alcance, unidades):
+    """
+    Convierte un alcance resuelto en el plan de la prueba: cuántas preguntas y términos en total, y
+    cuántos le tocan a cada clase. Devuelve None si el alcance no está resuelto.
+    """
+    if not alcance or alcance.get("modo") not in ("clase", "unidad", "varias"):
+        return None
+    todas = {c["n"]: c for c in _todas_las_clases(unidades)}
+    clases = [todas[n] for n in alcance["clases"] if n in todas]
+    if not clases:
+        return None
+    es_clase = alcance["modo"] == "clase" and len(clases) == 1
+    n_preg = PREGUNTAS_PRUEBA_CLASE if es_clase else PREGUNTAS_PRUEBA_UNIDAD
+    n_par = PAREADOS_PRUEBA_CLASE if es_clase else PAREADOS_PRUEBA_UNIDAD
+    rp, rt = _repartir(n_preg, len(clases)), _repartir(n_par, len(clases))
+    detalle = [
+        {"n": c["n"], "nombre": c["nombre"], "preguntas": rp[i], "terminos": rt[i]}
+        for i, c in enumerate(clases)
+    ]
+    if es_clase:
+        etiqueta = f"la Clase {clases[0]['n']} ({clases[0]['nombre']})"
+    elif alcance["modo"] == "unidad":
+        etiqueta = f"la Unidad {alcance['unidad']} (" + ", ".join(f"Clase {c['n']}" for c in clases) + ")"
+    else:
+        etiqueta = "las clases " + ", ".join(str(c["n"]) for c in clases)
+    return {
+        "modo": "clase" if es_clase else "unidad",
+        "n_preguntas": n_preg,
+        "n_pareados": n_par,
+        "clases": detalle,
+        "etiqueta": etiqueta,
+    }
+
+
+def texto_pregunta_alcance(unidades, aclaracion=None):
+    """Pregunta (en tono cercano) de qué clase o unidad quiere la prueba, con las opciones reales."""
+    lineas = []
+    if aclaracion:
+        lineas.append(aclaracion)
+    else:
+        lineas.append("¡Buena idea ponerse a prueba! 🎯 Para armártela justa, cuéntame: ¿la quieres de "
+                      "**toda una unidad** o de **una clase en particular**?")
+    if unidades:
+        lineas.append("\nAsí está la asignatura:")
+        for u in unidades:
+            cl = "; ".join(f"Clase {c['n']} ({c['nombre']})" for c in u["clases"])
+            lineas.append(f"- **{u['etiqueta']}**: {cl}")
+    lineas.append(
+        f"\nSi es de una clase, serán **{PREGUNTAS_PRUEBA_CLASE} preguntas de selección múltiple + "
+        f"{PAREADOS_PRUEBA_CLASE} términos pareados**. Si es de toda la unidad, **{PREGUNTAS_PRUEBA_UNIDAD} "
+        f"preguntas de selección múltiple + {PAREADOS_PRUEBA_UNIDAD} términos pareados**. "
+        "Respóndeme, por ejemplo, \"Unidad 4\" o \"Clase 6\"."
+    )
+    return "\n".join(lineas)
+
+
+def texto_aclaracion_alcance(alcance, unidades):
+    """Mensaje para pedirle al estudiante que precise el alcance cuando no quedó claro."""
+    modo = (alcance or {}).get("modo")
+    if modo == "ambiguo" and alcance.get("candidatas"):
+        todas = {c["n"]: c for c in _todas_las_clases(unidades)}
+        opciones = "; ".join(
+            f"Clase {n} ({todas[n]['nombre']})" for n in alcance["candidatas"] if n in todas
+        )
+        return (
+            f"Con eso me calzan varias clases: {opciones}. ¿Cuál de ellas quieres? "
+            "También puedo armarte la prueba de toda la unidad si prefieres (dime \"Unidad N\")."
+        )
+    if modo == "unidad_sin_numero":
+        return texto_pregunta_alcance(
+            unidades, aclaracion="¿De qué unidad la quieres? Dime el número, por ejemplo \"Unidad 4\"."
+        )
+    if modo == "ambiguo":
+        return texto_pregunta_alcance(
+            unidades, aclaracion="Esa unidad o clase no la encuentro en el cronograma. 🤔 Elige una de estas:"
+        )
+    return texto_pregunta_alcance(unidades)
+
+
 PROMPT_PEDAGOGICO = """
 Eres 'TutorSocrático', pero pensado como ese compañero de curso que se sabe la materia increíble y
 al que todos le preguntan porque explica bien y da gusto conversar con él — no como un profesor que
@@ -375,6 +623,13 @@ CÓMO CONVERSAR:
    que suene concreto en vez de genérico. Si no hay ningún ítem que calce (ver regla anti-invención del
    punto 6), simplemente pregunta el formato como siempre, sin mencionar materiales.
 
+   OFERTA DE LA PRUEBA AL INICIO (en esta misma pregunta): justo DESPUÉS de ofrecer el material de apoyo
+   (o, si no hay material que ofrecer, justo después de las opciones de formato), suma UNA frase breve y
+   natural que avise que al final del estudio se puede hacer una prueba, del estilo: "Y al final, si
+   quieres, también podemos hacer una prueba para saber cuánto hemos aprendido." Solo una vez por tema
+   (no la repitas en cada mensaje) y sin preguntar todavía el alcance: esa pregunta va después de
+   entregar el contenido (ver punto 4).
+
 4. ENTREGA COMPLETA Y CORRECTA: una vez elegido el formato, da la explicación completa ahí mismo, sin
    cortarla ni esconder partes. RESPALDO — solo si el estudiante saltó la pregunta del punto 3 (por
    ejemplo, porque ya venía con el formato decidido en su mensaje, tipo "explícamelo con un ejemplo"),
@@ -382,6 +637,15 @@ CÓMO CONVERSAR:
    entregar la explicación, EN ESE MISMO MENSAJE, revisa igual si hay un material de apoyo asociado (ver
    punto 6) y, si lo hay, ofrécelo ahí — no dejes pasar el turno esperando "otra oportunidad" para
    mencionarlo. Si ya lo ofreciste en la pregunta del punto 3, no lo vuelvas a ofrecer acá.
+
+   CIERRE CON OFERTA DE PRUEBA (cuando entregues material que el estudiante pidió: mapa conceptual,
+   esquema, resumen o mini-informe, tabla): al terminar la entrega, cierra con una pregunta natural y
+   cercana, parecida a: "¿Quieres hacer una prueba para saber si hemos aprendido? ¿De toda la unidad o
+   de alguna clase en particular?". Pregunta el alcance ahí mismo: de eso depende el formato (ver punto
+   7). En ese mismo mensaje, en una línea sola al final, escribe exactamente [[OFERTA_PRUEBA]] (la app
+   la oculta; le sirve para entender la respuesta del estudiante y armar la prueba). Hazlo una vez por
+   entrega; si el estudiante ya dijo que no quiere la prueba, no insistas. Cuando el estudiante responda
+   con el alcance, la app arma la prueba por su cuenta: en ese turno tú NO escribas preguntas ni bloques.
 
 4.1 CÓMO ENTREGAR CADA FORMATO (importante para que se vea bien en la app):
    - "Tabla comparativa": usa una tabla en markdown normal (filas con | y una fila separadora con ---).
@@ -570,16 +834,24 @@ CÓMO CONVERSAR:
    control" de la app), tu primer paso casi siempre es preguntar de qué clase(s) o tema(s) lo quiere
    — puede ser sobre una sola clase puntual o sobre varias/toda la cátedra vista hasta ahora. Ofrécele
    2-3 opciones de temas que hayan conversado como sugerencia (así no parte de cero), pero deja claro
-   que puede pedir cualquier otro. Solo genera el control cuando ya sepas el alcance — si en un mismo
-   mensaje el estudiante YA especifica el tema (ej. "hazme un control de los forámenes craneales"),
-   no hace falta preguntar, genera directo.
+   que puede pedir cualquier otro. Solo genera el control cuando ya sepas el alcance (clase puntual o
+   unidad completa, ver CANTIDAD SEGÚN EL ALCANCE) — si en un mismo mensaje el estudiante YA lo
+   especifica (ej. "hazme un control de la clase 6" o "de toda la unidad 4"), no hace falta preguntar,
+   genera directo.
+
+   CANTIDAD SEGÚN EL ALCANCE (regla fija del profesor): al pedir una prueba, control o evaluación
+   (cualquiera de esos nombres), pregunta si la quiere "de toda la unidad o de alguna clase en
+   particular" (con [[OFERTA_PRUEBA]] al final de esa pregunta, ver punto 4):
+   - De UNA clase: 10 preguntas de selección múltiple + 10 términos pareados.
+   - De TODA la unidad: 24 preguntas de selección múltiple, repartidas por igual entre todas las
+     clases de la unidad, + 10 términos pareados con términos de todas las clases de la unidad.
+   Esas cantidades son EXACTAS; no las cambies a 8, 3 ni "5 por defecto".
 
    "CONTROL COMPLETO": si el estudiante pide (o confirma, después de que se lo preguntaste) un
-   "control completo", arma AMBOS bloques en la misma respuesta — un ```quiz``` con 8 preguntas de
-   selección múltiple y un ```pareados``` con 8 términos — uno después del otro, cada uno con su
-   propia frase breve de contexto antes. En ese caso NO uses el valor por defecto de 3-5 preguntas
-   del bloque quiz: deben ser 8, para que calce con las 8 del bloque pareados. Si pide solo uno de
-   los dos formatos ("solo selección múltiple", "solo pareados"), arma únicamente ese bloque.
+   control/prueba completo, arma AMBOS bloques en la misma respuesta — un ```quiz``` y un ```pareados```
+   con las cantidades de arriba — uno después del otro, cada uno con su propia frase breve de contexto
+   antes. En ese caso NO uses el valor por defecto de 3-5 preguntas del bloque quiz. Si pide solo uno
+   de los dos formatos ("solo selección múltiple", "solo pareados"), arma únicamente ese bloque.
 
    FORMATO ```quiz``` (selección múltiple, feedback inmediato por pregunta — JSON válido, una sola
    pregunta o varias dentro de la misma lista "preguntas"):
@@ -854,7 +1126,8 @@ class TutorCore:
         return f"⚠️ No se pudo conectar con ningún modelo de Gemini. Detalle: {ultimo_error}"
 
     def generar_control(self, tema, n_preguntas=8, n_pareados=8, historial_chat=None,
-                         contexto_material="", cronograma=None, contenidos_evaluaciones=None):
+                         contexto_material="", cronograma=None, contenidos_evaluaciones=None,
+                         plan=None):
         """
         Genera un mini control (selección múltiple + términos pareados) con salida JSON forzada por
         schema en vez de pedírselo al modelo dentro de una respuesta conversacional libre — ver la
@@ -873,6 +1146,29 @@ class TutorCore:
         except Exception as e:
             return None, f"⚠️ No se pudo inicializar el cliente de Gemini. Detalle: {e}"
 
+        reparto_texto = ""
+        if plan:
+            # El plan (ver plan_control) manda: cantidades totales y cuántas le tocan a cada clase.
+            n_preguntas, n_pareados = plan["n_preguntas"], plan["n_pareados"]
+            tema = plan.get("etiqueta") or tema
+            if len(plan["clases"]) == 1:
+                c = plan["clases"][0]
+                reparto_texto = (
+                    f"\n\nALCANCE: TODAS las preguntas y TODOS los términos deben ser SOLO de la "
+                    f"Clase {c['n']} ({c['nombre']}); no uses contenido de ninguna otra clase."
+                )
+            else:
+                filas_p = "; ".join(f"Clase {c['n']} ({c['nombre']}): {c['preguntas']}" for c in plan["clases"])
+                filas_t = "; ".join(f"Clase {c['n']} ({c['nombre']}): {c['terminos']}" for c in plan["clases"])
+                reparto_texto = (
+                    "\n\nREPARTO OBLIGATORIO (exacto, no lo cambies): "
+                    f"preguntas de selección múltiple por clase → {filas_p}. "
+                    f"Términos pareados por clase → {filas_t}. "
+                    "Cada pregunta y cada término debe basarse SOLO en el contenido de la clase a la "
+                    "que pertenece (usa los encabezados '=== CLASE ... ' del material para no mezclar). "
+                    "Ordena las preguntas por clase, de la menor a la mayor número de clase."
+                )
+
         partes_pedido = []
         if n_preguntas > 0:
             partes_pedido.append(f"exactamente {n_preguntas} preguntas de selección múltiple")
@@ -884,7 +1180,8 @@ class TutorCore:
             "Eres CogniMorph generando un CONTROL FORMATIVO (autoevaluación de práctica, NO una "
             "evaluación calificada real — nada de esto se sube ni se entrega a ningún profesor) "
             f"para un estudiante universitario de salud. Arma {pedido_texto} sobre el siguiente "
-            f"contenido: {(tema or '').strip() or 'todo el contenido de la asignatura visto hasta ahora'}.\n\n"
+            f"contenido: {(tema or '').strip() or 'todo el contenido de la asignatura visto hasta ahora'}."
+            f"{reparto_texto}\n\n"
             "Reglas:\n"
             "- Cada pregunta de selección múltiple con 3 a 5 alternativas y UNA sola correcta; "
             "'correcta' es el índice de esa alternativa dentro de 'alternativas', empezando en 0 — "
@@ -931,6 +1228,23 @@ class TutorCore:
 
         modelos_a_probar = elegir_modelos_a_intentar(client)
         ultimo_error = ""
+        mejor_parcial = {"datos": None, "puntaje": -1}
+
+        def _cumple(datos):
+            """True si el control trae al menos la cantidad pedida (y la deja exacta); si no, guarda el mejor intento
+            (el que más se acerca) para devolverlo solo si ningún modelo logra la cantidad exacta."""
+            if not isinstance(datos, dict):
+                return False
+            n_p, n_t = len(datos.get("preguntas") or []), len(datos.get("terminos") or [])
+            if n_p >= n_preguntas and n_t >= n_pareados:
+                # Si el modelo se pasó de la cantidad pedida, se recorta al número exacto.
+                datos["preguntas"] = (datos.get("preguntas") or [])[:n_preguntas]
+                datos["terminos"] = (datos.get("terminos") or [])[:n_pareados]
+                return True
+            puntaje = min(n_p, n_preguntas) + min(n_t, n_pareados)
+            if puntaje > mejor_parcial["puntaje"]:
+                mejor_parcial["datos"], mejor_parcial["puntaje"] = datos, puntaje
+            return False
 
         for nombre_modelo in modelos_a_probar:
             # Intento 1: schema forzado con Pydantic — la API garantiza que la estructura calce,
@@ -946,9 +1260,13 @@ class TutorCore:
                 )
                 datos = getattr(response, "parsed", None)
                 if datos is not None:
-                    return datos.model_dump(), None
-                if response and response.text:
-                    return json.loads(response.text), None
+                    d = datos.model_dump()
+                    if _cumple(d):
+                        return d, None
+                elif response and response.text:
+                    d = json.loads(response.text)
+                    if _cumple(d):
+                        return d, None
             except Exception as e:
                 ultimo_error = f"{nombre_modelo} (con schema): {e}"
 
@@ -961,7 +1279,9 @@ class TutorCore:
                     config=types.GenerateContentConfig(response_mime_type="application/json"),
                 )
                 if response and response.text:
-                    return json.loads(response.text), None
+                    d = json.loads(response.text)
+                    if _cumple(d):
+                        return d, None
             except Exception as e:
                 ultimo_error = f"{nombre_modelo} (json sin schema): {e}"
 
@@ -978,9 +1298,14 @@ class TutorCore:
                     texto = response.text.strip()
                     inicio, fin = texto.find("{"), texto.rfind("}")
                     if inicio != -1 and fin != -1:
-                        return json.loads(texto[inicio:fin + 1]), None
+                        d = json.loads(texto[inicio:fin + 1])
+                        if _cumple(d):
+                            return d, None
             except Exception as e:
                 ultimo_error = f"{nombre_modelo} (extracción manual): {e}"
                 continue
 
+        if mejor_parcial["datos"] is not None:
+            # Ningún intento trajo la cantidad exacta: se entrega el que más se acercó antes que nada.
+            return mejor_parcial["datos"], None
         return None, f"⚠️ No se pudo generar el control. Detalle: {ultimo_error}"
