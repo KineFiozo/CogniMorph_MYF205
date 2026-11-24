@@ -1,6 +1,7 @@
 import json
 import os
 import re
+from datetime import date, datetime, timedelta, timezone
 from typing import List, Optional
 
 from google import genai
@@ -11,6 +12,223 @@ from pypdf import PdfReader
 # Cuántos turnos previos (usuario + tutor) se reenvían como contexto de la conversación.
 # Suficiente para que el tutor recuerde el hilo de un mismo tema sin disparar el costo/tamaño de la consulta.
 MAX_TURNOS_HISTORIAL = 12
+
+# ---------------------------------------------------------------------------------------------
+# FECHA ACTUAL + ESTADO DEL CALENDARIO (determinista, calculado en código)
+# ---------------------------------------------------------------------------------------------
+# Problema que resuelve: un LLM no sabe qué día es hoy. Si solo recibe el cronograma completo,
+# responde "la evaluación que corresponde ahora" con la primera que ve (CAT 1, en septiembre).
+# Igual que con las clases y los materiales, NO se le deja deducir esto "de memoria": el código
+# calcula qué evaluaciones ya pasaron, cuáles son de esta semana y cuáles vienen, y se lo
+# entrega ya etiquetado. Se recalcula en CADA consulta (nada cacheado), así que siempre está al día.
+
+_DIAS_SEMANA = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+_MESES_NOMBRE = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
+                 "septiembre", "octubre", "noviembre", "diciembre"]
+_MESES_ABREV = {"ene": 1, "feb": 2, "mar": 3, "abr": 4, "may": 5, "jun": 6, "jul": 7,
+                "ago": 8, "sep": 9, "set": 9, "oct": 10, "nov": 11, "dic": 12}
+
+# Qué filas del cronograma cuentan como "evaluación" (el resto: clases, talleres, consolidación).
+_PATRON_EVAL = re.compile(
+    r"^\s*(c[aá]tedra\s*\d|cat\s+[ivx\d]+|epe?oe|ej\d|ejercicio\s*\d|examen|prueba\s+recuperativa"
+    r"|evaluaciones?\s+recuperativas?|avance\s+de\s+p[oó]ster|control|solemne|taller\s+pr[aá]ctico)",
+    re.IGNORECASE,
+)
+
+
+def fecha_hoy_chile():
+    """Fecha de hoy en hora de Chile (el servidor de Streamlit Cloud corre en UTC)."""
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("America/Santiago")).date()
+    except Exception:
+        # Sin base de zonas horarias (ej. Windows sin 'tzdata'): UTC-3 (horario de verano chileno).
+        return datetime.now(timezone(timedelta(hours=-3))).date()
+
+
+def _fmt_fecha(d):
+    return f"{_DIAS_SEMANA[d.weekday()]} {d.day} de {_MESES_NOMBRE[d.month - 1]} de {d.year}"
+
+
+def _fmt_corta(d):
+    return f"{d.day:02d}-{d.month:02d}-{d.year}"
+
+
+def _parse_dmy(texto):
+    """'12-10-2026' -> date. None si no calza."""
+    m = re.match(r"^\s*(\d{1,2})[-/](\d{1,2})[-/](\d{4})\s*$", str(texto or ""))
+    if not m:
+        return None
+    try:
+        return date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+    except ValueError:
+        return None
+
+
+def _mes_num(token):
+    return _MESES_ABREV.get(str(token or "").strip().lower()[:3])
+
+
+def _parse_rango(texto, anio):
+    """
+    Fechas escritas como en los cronogramas por semana: '31 Ago-4 Sep', '3-7 Ago', '13 Dic',
+    '12 de Septiembre'. Devuelve (inicio, fin) como date, o None si no se entiende.
+    """
+    t = str(texto or "").strip()
+    try:
+        m = re.match(r"^(\d{1,2})\s*(?:de\s+)?([A-Za-zñÑ]+)?\s*[-–]\s*(\d{1,2})\s*(?:de\s+)?([A-Za-zñÑ]+)$", t)
+        if m:
+            mes_fin = _mes_num(m.group(4))
+            mes_ini = _mes_num(m.group(2)) or mes_fin
+            if mes_ini and mes_fin:
+                return date(anio, mes_ini, int(m.group(1))), date(anio, mes_fin, int(m.group(3)))
+        m = re.match(r"^(\d{1,2})\s*(?:de\s+)?([A-Za-zñÑ]+)$", t)
+        if m and _mes_num(m.group(2)):
+            d = date(anio, _mes_num(m.group(2)), int(m.group(1)))
+            return d, d
+    except ValueError:
+        pass
+    return None
+
+
+def _anio_del_cronograma(cronograma, hoy):
+    meta = cronograma.get("meta", {}) if isinstance(cronograma, dict) else {}
+    periodo = str(meta.get("periodo", ""))
+    if re.match(r"^20\d\d", periodo):
+        return int(periodo[:4])
+    # Año suelto en el nombre del archivo ("... 2026.xlsx"). OJO: no debe confundirse con el código
+    # de la asignatura ("MYF2069"), por eso se exige que no esté pegado a otra letra o dígito.
+    m = re.search(r"(?<![A-Za-z0-9])(20\d\d)(?!\d)", str(meta.get("fuente_original", "")))
+    anio = int(m.group(1)) if m else hoy.year
+    return anio if abs(anio - hoy.year) <= 1 else hoy.year
+
+
+def extraer_eventos_calendario(cronograma, hoy):
+    """
+    Recorre el cronograma (cualquiera de los formatos que usa CogniMorph) y devuelve:
+      - eventos: lista de {'nombre', 'inicio', 'fin'} SOLO de evaluaciones/entregas, con fechas reales
+      - sesiones: lista de {'inicio', 'fin', 'texto'} con lo que toca cada semana (clases/talleres)
+    """
+    eventos, sesiones = [], []
+    anio = _anio_del_cronograma(cronograma, hoy)
+
+    # Formato A (MYF205): {"dias": [{"fecha": "03-08-2026", "catedra": {...}, "taller": {...}}]}
+    if isinstance(cronograma, dict) and isinstance(cronograma.get("dias"), list):
+        for dia in cronograma["dias"]:
+            d = _parse_dmy(dia.get("fecha"))
+            if not d:
+                continue
+            partes = []
+            for clave, etiqueta in (("catedra", "Cátedra"), ("taller", "Taller")):
+                bloque = dia.get(clave) or {}
+                cont = (bloque.get("contenido") or "").strip()
+                if cont:
+                    partes.append(f"{etiqueta}: {cont}")
+                    if _PATRON_EVAL.search(cont):
+                        eventos.append({"nombre": f"{cont} ({etiqueta.lower()})", "inicio": d, "fin": d})
+                hito = (bloque.get("hito") or "").strip()
+                if hito:
+                    partes.append(f"Hito de taller: {hito}")
+                    eventos.append({"nombre": f"{hito} (taller)", "inicio": d, "fin": d})
+            sesiones.append({"inicio": d, "fin": d + timedelta(days=6), "texto": " | ".join(partes)})
+
+    # Formato B (MYF2069): {"semanas": [{"fecha": "31 Ago-4 Sep", "bloque_especial": ..., ...}]}
+    elif isinstance(cronograma, dict) and isinstance(cronograma.get("semanas"), list):
+        for sem in cronograma["semanas"]:
+            rango = _parse_rango(sem.get("fecha"), anio)
+            if not rango:
+                continue
+            ini, fin = rango
+            especial = (sem.get("bloque_especial") or "").strip()
+            cat = sem.get("catedra") or []
+            tal = sem.get("taller") or []
+            partes = []
+            if especial:
+                partes.append(especial)
+            if cat:
+                partes.append("Cátedra: " + "; ".join(cat))
+            if tal:
+                partes.append("Taller: " + "; ".join(tal))
+            if especial and _PATRON_EVAL.search(especial):
+                eventos.append({"nombre": especial, "inicio": ini, "fin": fin})
+            for t in tal:
+                if _PATRON_EVAL.search(t):
+                    eventos.append({"nombre": f"{t} (taller)", "inicio": ini, "fin": fin})
+            sesiones.append({"inicio": ini, "fin": fin, "texto": " | ".join(partes)})
+
+    # Formato C (maqueta por defecto): [{"evento": "Control 1: ...", "fecha": "12 de Septiembre"}]
+    elif isinstance(cronograma, list):
+        for ev in cronograma:
+            if not isinstance(ev, dict):
+                continue
+            rango = _parse_rango(ev.get("fecha"), anio)
+            if rango and ev.get("evento"):
+                eventos.append({"nombre": ev["evento"], "inicio": rango[0], "fin": rango[1]})
+
+    eventos.sort(key=lambda e: (e["inicio"], e["nombre"]))
+    return eventos, sesiones
+
+
+def _rango_txt(ev):
+    if ev["inicio"] == ev["fin"]:
+        return _fmt_corta(ev["inicio"])
+    return f"semana del {_fmt_corta(ev['inicio'])} al {_fmt_corta(ev['fin'])}"
+
+
+def bloque_fecha_actual(cronograma=None, hoy=None):
+    """
+    Texto listo para el system prompt: fecha de hoy + qué evaluaciones ya pasaron, cuáles son
+    de esta semana y cuáles vienen, calculado en código a partir del cronograma.
+    """
+    hoy = hoy or fecha_hoy_chile()
+    lineas = [
+        "FECHA ACTUAL (autoridad absoluta para 'hoy', 'ahora', 'esta semana', 'la próxima'; "
+        "calculada por el sistema, hora de Chile): "
+        f"hoy es {_fmt_fecha(hoy)}."
+    ]
+    if not cronograma:
+        return "\n".join(lineas)
+
+    try:
+        eventos, sesiones = extraer_eventos_calendario(cronograma, hoy)
+    except Exception:
+        return "\n".join(lineas)
+
+    if sesiones:
+        actual = [s for s in sesiones if s["inicio"] <= hoy <= s["fin"]]
+        if actual:
+            lineas.append(f"SEMANA EN CURSO según el cronograma: {actual[-1]['texto']}")
+        elif hoy < sesiones[0]["inicio"]:
+            lineas.append(f"El semestre aún no parte (primera sesión: {_fmt_corta(sesiones[0]['inicio'])}).")
+        elif hoy > sesiones[-1]["fin"]:
+            lineas.append("El cronograma del semestre ya terminó (no hay más sesiones programadas).")
+
+    if eventos:
+        pasadas = [e for e in eventos if e["fin"] < hoy]
+        vigentes = [e for e in eventos if e["inicio"] <= hoy <= e["fin"]]
+        proximas = [e for e in eventos if e["inicio"] > hoy]
+        if pasadas:
+            lineas.append("EVALUACIONES YA REALIZADAS (fecha pasada): "
+                          + "; ".join(f"{e['nombre']} — {_rango_txt(e)}" for e in pasadas))
+        if vigentes:
+            lineas.append("EVALUACIONES DE ESTA SEMANA / HOY: "
+                          + "; ".join(f"{e['nombre']} — {_rango_txt(e)}" for e in vigentes))
+        if proximas:
+            lineas.append("PRÓXIMAS EVALUACIONES (en orden cronológico): "
+                          + "; ".join(f"{e['nombre']} — {_rango_txt(e)}" for e in proximas))
+        elif not vigentes:
+            lineas.append("NO quedan evaluaciones futuras en el cronograma.")
+
+    lineas.append(
+        "REGLAS DE FECHA: (1) Cuando el estudiante hable de 'la evaluación que toca ahora', 'la "
+        "próxima', 'esta semana' u 'hoy', responde SOLO con las listas de arriba; nunca presentes "
+        "como próxima ni como vigente una evaluación que figura en 'YA REALIZADAS'. (2) Usa el "
+        "nombre de cada evaluación tal como aparece en el cronograma; no lo conviertas en un nombre "
+        "de CONTENIDOS_POR_EVALUACION (CAT 1, CAT 2...) salvo que el nombre calce exactamente. "
+        "(3) Si no hay ninguna lista aplicable, dilo en vez de adivinar. (4) No inventes fechas."
+    )
+    return "\n".join(lineas)
+
 
 PROMPT_PEDAGOGICO = """
 Eres 'TutorSocrático', pero pensado como ese compañero de curso que se sabe la materia increíble y
@@ -30,6 +248,11 @@ CÓMO CONVERSAR:
    - FECHAS (cuándo es cada evaluación, ponderación general del cronograma): básate ESTRICTAMENTE
      en el CRONOGRAMA OFICIAL que se te entrega más abajo — no inventes ni asumas fechas que no
      estén ahí.
+   - "HOY" Y "AHORA": el bloque FECHA ACTUAL (al inicio de estas instrucciones) trae la fecha real de
+     hoy y ya clasifica las evaluaciones en realizadas / de esta semana / próximas. Úsalo SIEMPRE
+     que el estudiante pregunte por la evaluación que toca ahora, la próxima, lo que viene esta
+     semana o cuánto falta. NO recorras el cronograma completo para deducirlo tú, y NO empieces
+     por la primera evaluación del semestre: si una evaluación ya pasó, di que ya se realizó.
    - CONTENIDOS POR EVALUACIÓN (qué unidades/temas entran en cada CAT, EPOE, Ejercicio, etc.):
      básate ESTRICTAMENTE en el bloque CONTENIDOS_POR_EVALUACION que se te entrega más abajo (si
      aparece) — es la fuente oficial para esto, MÁS PRECISA que el cronograma para esta pregunta
@@ -440,6 +663,7 @@ class TutorCore:
 
         bloques = [
             "Eres 'CogniMorph', tutor inteligente universitario.",
+            bloque_fecha_actual(cronograma),
         ]
 
         if estudiante_info:
@@ -621,6 +845,7 @@ class TutorCore:
                 f"{contexto_material}\n-------------------"
             )
         if cronograma:
+            instrucciones += f"\n\n{bloque_fecha_actual(cronograma)}"
             instrucciones += f"\n\nCRONOGRAMA OFICIAL (fechas): {json.dumps(cronograma, ensure_ascii=False)}"
         if contenidos_evaluaciones:
             instrucciones += (
