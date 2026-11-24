@@ -3,7 +3,7 @@ import streamlit.components.v1 as components
 from pypdf import PdfReader
 from tutor_core import (
     TutorCore, estructura_unidades, interpretar_alcance, clases_de_evaluacion, plan_control,
-    texto_pregunta_alcance, texto_aclaracion_alcance,
+    texto_pregunta_alcance, texto_aclaracion_alcance, clases_relevantes,
 )
 import json
 import os
@@ -615,7 +615,7 @@ def _numero_clase_pdf(nombre_archivo):
     return int(m.group(1)) if m else None
 
 
-def cargar_textos_pdfs_materia(cod_materia, solo_clases=None):
+def cargar_textos_pdfs_materia(cod_materia, solo_clases=None, tope_por_archivo=None):
     """
     Lee los PDF de data/{cod_materia}/clases_pdf/ y arma un solo bloque de texto para el tutor,
     pero CADA clase queda claramente separada y etiquetada con su nombre de archivo (ej.
@@ -631,9 +631,11 @@ def cargar_textos_pdfs_materia(cod_materia, solo_clases=None):
       qué clase específica viene cada dato.
     - solo_clases (lista de números, ej. [6, 7, 8]): si se entrega, se leen SOLO esas clases — así
       una prueba de la Clase 6 o de la Unidad 4 se arma únicamente con ese contenido.
+    - tope_por_archivo: máximo de caracteres por PDF (por defecto 12.000); se reduce cuando se envían
+      muchas clases a la vez para no pasarse del límite de tokens por minuto de la API gratuita.
     """
     carpeta_pdfs = os.path.join(DATA_DIR, cod_materia, "clases_pdf")
-    TOPE_POR_ARCHIVO = 12000  # caracteres por PDF — antes era ~1.250 compartido entre todos
+    TOPE_POR_ARCHIVO = tope_por_archivo or 12000  # caracteres por PDF — antes era ~1.250 compartido entre todos
     TOPE_TOTAL = 200000  # tope de seguridad global, muy por encima de lo que se necesita en la práctica
 
     if not os.path.exists(carpeta_pdfs):
@@ -818,6 +820,30 @@ def _separar_marca_oferta_prueba(texto):
     if not texto or not _PATRON_MARCA_OFERTA_PRUEBA.search(texto):
         return texto, False
     return _PATRON_MARCA_OFERTA_PRUEBA.sub("\n", texto).strip(), True
+
+
+def contexto_pdfs_para_consulta(cod_materia, texto_actual, historial_previo):
+    """
+    Texto de los PDF que se le envía al tutor en una consulta normal. Antes se enviaban SIEMPRE las 12
+    clases completas (~50 mil tokens por mensaje), lo que agotaba rápido el límite por minuto del plan
+    gratuito de Gemini y además favorecía que mezclara clases. Ahora:
+    - si el mensaje (o los últimos mensajes del estudiante) nombran una clase, unidad o evaluación, se
+      envían SOLO esas clases (con un tope de caracteres que se reparte si son varias);
+    - si no se puede saber de qué clase hablan, se envía una versión reducida de TODAS las clases (4.000
+      caracteres por clase) para que el tutor siga teniendo material de dónde apoyarse.
+    """
+    unidades = estructura_unidades(cargar_cronograma(cod_materia))
+    clases = []
+    if unidades:
+        entrada = _buscar_evaluacion_contenidos(cargar_contenidos_evaluaciones(cod_materia), texto_actual)
+        if entrada is not None:
+            clases = clases_de_evaluacion(entrada, unidades)
+        if not clases:
+            clases = clases_relevantes(texto_actual, historial_previo, unidades)
+    if clases:
+        tope = min(12000, max(3000, 48000 // len(clases)))
+        return cargar_textos_pdfs_materia(cod_materia, solo_clases=clases, tope_por_archivo=tope)
+    return cargar_textos_pdfs_materia(cod_materia, tope_por_archivo=4000)
 
 
 def _resolver_pedido_prueba(texto, cod_materia, solo_si_claro=False, evaluacion_sugerida=None):
@@ -1960,6 +1986,9 @@ if control_pendiente is not None:
             contexto_material = cargar_textos_pdfs_materia(
                 cod_materia,
                 solo_clases=[c["n"] for c in plan_control_actual["clases"]] if plan_control_actual else None,
+                tope_por_archivo=(
+                    min(12000, max(3000, 48000 // len(plan_control_actual["clases"]))) if plan_control_actual else 4000
+                ),
             )
             if st.session_state.contexto_pdf_manual:
                 contexto_material += "\n" + st.session_state.contexto_pdf_manual
@@ -1998,7 +2027,7 @@ elif texto_a_enviar:
     with st.chat_message("assistant", avatar=ruta_avatar):
         with st.spinner("CogniMorph procesando análisis pedagógico..."):
             tutor = TutorCore(api_key=api_key)
-            contexto_material = cargar_textos_pdfs_materia(cod_materia)
+            contexto_material = contexto_pdfs_para_consulta(cod_materia, texto_a_enviar, historial_previo)
             if st.session_state.contexto_pdf_manual:
                 contexto_material += "\n" + st.session_state.contexto_pdf_manual
 
