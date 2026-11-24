@@ -1,7 +1,10 @@
 import streamlit as st
 import streamlit.components.v1 as components
 from pypdf import PdfReader
-from tutor_core import TutorCore
+from tutor_core import (
+    TutorCore, estructura_unidades, interpretar_alcance, clases_de_evaluacion, plan_control,
+    texto_pregunta_alcance, texto_aclaracion_alcance,
+)
 import json
 import os
 import re
@@ -603,19 +606,31 @@ def buscar_material_por_id(materiales_disponibles, material_id):
     return None
 
 
-def cargar_textos_pdfs_materia(cod_materia):
+def _numero_clase_pdf(nombre_archivo):
     """
-    Lee todos los PDF de data/{cod_materia}/clases_pdf/ y arma un solo bloque de texto para el
-    tutor, pero CADA clase queda claramente separada y etiquetada con su nombre de archivo (ej.
+    Número de clase de un PDF según su nombre: "C4. Cavidad nasal...pdf" -> 4, "U3_C7. Fisiología
+    vascular...pdf" -> 7, "C0_Presentación...pdf" -> 0. None si el nombre no trae un "C<número>".
+    """
+    m = re.search(r"(?:^|[^A-Za-z0-9])[Cc](\d+)(?!\d)", nombre_archivo)
+    return int(m.group(1)) if m else None
+
+
+def cargar_textos_pdfs_materia(cod_materia, solo_clases=None):
+    """
+    Lee los PDF de data/{cod_materia}/clases_pdf/ y arma un solo bloque de texto para el tutor,
+    pero CADA clase queda claramente separada y etiquetada con su nombre de archivo (ej.
     "=== CLASE (archivo: C4. Cavidad nasal y fosas_REV.pdf) ==="). Antes esto se concatenaba todo
     junto, sin separador ni orden garantizado (os.listdir no garantiza orden) y con un tope de
     15.000 caracteres TOTAL repartidos entre todos los PDF — con 12 archivos eso daba ~1.250
     caracteres por clase, así que el tutor terminaba adivinando/mezclando contenidos (reportado:
     preguntó por la Clase 4 y respondió con contenido de la Clase 7). Ahora:
-    - Se ordenan los archivos naturalmente (C1, C2, ... C12, no alfabético C1,C10,C11,C12,C2...).
+    - Se ordenan los archivos por número de clase (C1, C2, ... C12, no alfabético C1,C10,C11,C12,C2...),
+      también cuando el nombre empieza con la unidad ("U3_C7_...").
     - Cada PDF tiene su propio tope generoso (no compite por un total compartido tan chico).
     - El nombre del archivo va SIEMPRE antes de su contenido, para que el tutor pueda citar de
       qué clase específica viene cada dato.
+    - solo_clases (lista de números, ej. [6, 7, 8]): si se entrega, se leen SOLO esas clases — así
+      una prueba de la Clase 6 o de la Unidad 4 se arma únicamente con ese contenido.
     """
     carpeta_pdfs = os.path.join(DATA_DIR, cod_materia, "clases_pdf")
     TOPE_POR_ARCHIVO = 12000  # caracteres por PDF — antes era ~1.250 compartido entre todos
@@ -625,14 +640,16 @@ def cargar_textos_pdfs_materia(cod_materia):
         return ""
 
     def _clave_orden_natural(nombre_archivo):
-        # Extrae el número inicial tipo "C4", "C12" para ordenar 1,2,...,12 en vez de alfabético
-        m = re.match(r"[Cc](\d+)", nombre_archivo)
-        return (int(m.group(1)) if m else 9999, nombre_archivo.lower())
+        n = _numero_clase_pdf(nombre_archivo)
+        return (n if n is not None else 9999, nombre_archivo.lower())
 
     archivos_pdf = sorted(
         (a for a in os.listdir(carpeta_pdfs) if a.lower().endswith(".pdf")),
         key=_clave_orden_natural,
     )
+    if solo_clases:
+        permitidas = set(solo_clases)
+        archivos_pdf = [a for a in archivos_pdf if _numero_clase_pdf(a) in permitidas]
 
     secciones = []
     total_acumulado = 0
@@ -750,6 +767,113 @@ def _extraer_tema_control(texto):
     limpio = _PALABRAS_VACIAS_CONTROL.sub(" ", texto or "")
     limpio = re.sub(r"\s+", " ", limpio).strip(" ,.;:¿?¡!")
     return limpio if len(limpio) >= 4 else ""
+
+
+# --- PRUEBAS: ALCANCE (clase / unidad), MARCA INTERNA DEL TUTOR Y RESPUESTAS "SÍ" SUELTAS ---
+# El tutor, cuando ofrece una prueba, termina su mensaje con la marca [[OFERTA_PRUEBA]] (ver el punto
+# 4 del prompt en tutor_core.py). La app la oculta y recuerda que la próxima respuesta del estudiante
+# probablemente indique el alcance ("unidad 4", "clase 6", o solo "sí").
+_PATRON_MARCA_OFERTA_PRUEBA = re.compile(r"\s*\[\[\s*OFERTA_PRUEBA\s*\]\]\s*", re.IGNORECASE)
+
+# Respuestas que son solo "sí" (sin decir de qué clase o unidad) a una oferta de prueba.
+_PATRON_SI_SUELTO = re.compile(
+    r"^\s*[¡!¿]*\s*(s[ií]|sii+|dale|ok|okey|vale|claro|bueno|buena|quiero|vamos|ya|listo|"
+    r"por\s+supuesto|s[ií]\s+quiero|s[ií]\s+por\s+favor|hagámoslo|hagamoslo|armémosla|armemosla)\W*$",
+    re.IGNORECASE,
+)
+
+
+# Otras formas de pedir una prueba ("una prueba de la clase 6", "quiero rendir un test", "evaluación"):
+# palabras más ambiguas que "control"/"quiz" (la gente también dice "¿qué entra en la prueba?" o "¿cuándo
+# es la prueba?"), así que acá se exige un verbo de pedido (o un mensaje de 3 palabras o menos) y que NO sea una
+# pregunta por fecha ni por contenidos.
+_PATRON_PRUEBA_AMPLIA = re.compile(r"\b(prueba|pruebas|test|evaluaci[oó]n|evaluaciones|examen|ex[aá]menes)\b", re.IGNORECASE)
+_PATRON_VERBO_DE_PEDIDO = re.compile(
+    r"\b(quiero|quisiera|queremos|hazme|h[aá]game|dame|arma|arm[aá]me|armemos|armamos|puedes|podr[ií]as|"
+    r"podemos|vamos|hacer|hagamos|realizar|rendir|dar|tomar|practicar|prepara|prep[aá]rame|ponme|"
+    r"ofrece|ofr[eé]ceme|crea|cr[eé]ame|genera|gen[eé]rame|necesito|me\s+gustar[ií]a)\b",
+    re.IGNORECASE,
+)
+_PATRON_NO_ES_PEDIDO_DE_PRUEBA = re.compile(
+    r"\b(contenidos?|temas?|entra|entran|incluye|incluyen|abarca|abarcan|comprende|comprenden|"
+    r"cu[aá]ndo|qu[eé]\s+d[ií]a|fecha|fechas|calendario|nota|notas|resultado|resultados|ponderaci[oó]n)\b",
+    re.IGNORECASE,
+)
+
+
+def _es_pedido_de_prueba(texto):
+    """True si el mensaje del chat pide generar una prueba/control/quiz (no preguntar por su fecha o contenido)."""
+    texto = texto or ""
+    if _PATRON_PREGUNTA_FECHA_CONTROL.search(texto):
+        return False
+    if _PATRON_SOLICITUD_CONTROL.search(texto):
+        return True
+    if _PATRON_PRUEBA_AMPLIA.search(texto) and not _PATRON_NO_ES_PEDIDO_DE_PRUEBA.search(texto):
+        return bool(_PATRON_VERBO_DE_PEDIDO.search(texto)) or len(texto.split()) <= 3
+    return False
+
+
+def _separar_marca_oferta_prueba(texto):
+    """(texto_sin_marca, hay_marca) — quita la marca interna [[OFERTA_PRUEBA]] del mensaje del tutor."""
+    if not texto or not _PATRON_MARCA_OFERTA_PRUEBA.search(texto):
+        return texto, False
+    return _PATRON_MARCA_OFERTA_PRUEBA.sub("\n", texto).strip(), True
+
+
+def _resolver_pedido_prueba(texto, cod_materia, solo_si_claro=False, evaluacion_sugerida=None):
+    """
+    Decide qué hacer con un pedido de prueba/control. Devuelve (accion, dato):
+      ("generar", control_pendiente)  -> alcance claro: hay que armar la prueba (con su plan 10+10 o 24+10)
+      ("preguntar", mensaje)          -> falta precisar clase/unidad: se le pregunta al estudiante
+      ("seguir", None)                -> (solo con solo_si_claro=True) no era respuesta de alcance: el mensaje
+                                         sigue su camino normal hacia el tutor conversacional
+    Si el cronograma no permite deducir unidades/clases, cae al comportamiento simple (10 + 10 sobre el
+    tema escrito) para no dejar al estudiante sin prueba.
+    """
+    unidades = estructura_unidades(cargar_cronograma(cod_materia))
+    texto = texto or ""
+
+    if not unidades:
+        if solo_si_claro:
+            return "seguir", None
+        return "generar", {"tema": _extraer_tema_control(texto), "n_preguntas": 10, "n_pareados": 10}
+
+    alcance = None
+    # 1) ¿Nombró una evaluación puntual (CAT 2, EPOE 1...)? -> las clases que entran en ella
+    entrada = _buscar_evaluacion_contenidos(cargar_contenidos_evaluaciones(cod_materia), texto)
+    if entrada is not None and solo_si_claro and re.search(
+        r"\b(contenidos?|temas?|entra|entran|incluye|incluyen|abarca|abarcan|comprende|comprenden|"
+        r"cu[aá]ndo|fecha|fechas)\b", texto, re.IGNORECASE,
+    ):
+        entrada = None  # estaba preguntando por los contenidos/fecha de la evaluación, no eligiendo alcance
+    if entrada is None and evaluacion_sugerida and _PATRON_SI_SUELTO.match(texto):
+        for e in cargar_contenidos_evaluaciones(cod_materia):
+            if e.get("evaluacion") == evaluacion_sugerida:
+                entrada = e
+                break
+    if entrada is not None:
+        clases_eval = clases_de_evaluacion(entrada, unidades)
+        if clases_eval:
+            alcance = {"modo": "varias", "clases": clases_eval, "unidad": None, "candidatas": []}
+
+    # 2) Si no, interpretar clase / unidad / nombre de clase
+    if alcance is None:
+        alcance = interpretar_alcance(texto, unidades)
+
+    plan = plan_control(alcance, unidades)
+    if plan is not None:
+        return "generar", {
+            "tema": plan["etiqueta"], "plan": plan,
+            "n_preguntas": plan["n_preguntas"], "n_pareados": plan["n_pareados"],
+        }
+
+    if solo_si_claro:
+        # Esperábamos el alcance: si dijo algo ambiguo o solo "sí", se le vuelve a preguntar; si escribió
+        # cualquier otra cosa, se deja pasar al tutor normal.
+        if alcance["modo"] in ("ambiguo", "unidad_sin_numero") or _PATRON_SI_SUELTO.match(texto):
+            return "preguntar", texto_aclaracion_alcance(alcance, unidades)
+        return "seguir", None
+    return "preguntar", texto_aclaracion_alcance(alcance, unidades)
 
 
 def extraer_bloques(texto):
@@ -1129,7 +1253,7 @@ def _formatear_control_como_bloques(datos, tema=None):
     terminos = (datos or {}).get("terminos") or []
 
     tema_limpio = (tema or "").strip()
-    partes = [f"📝 **Aquí tienes tu control{f' de {tema_limpio}' if tema_limpio else ''}.**"]
+    partes = [f"📝 **Aquí tienes tu prueba{f' de {tema_limpio}' if tema_limpio else ''}.**"]
 
     if preguntas:
         partes.append(
@@ -1149,7 +1273,7 @@ def _formatear_control_como_bloques(datos, tema=None):
     if not preguntas and not terminos:
         partes.append("⚠️ No se generó ninguna pregunta ni término pareado para este control; intenta pedirlo de nuevo.")
     else:
-        partes.append("¡Mucho éxito! Cuando termines, cuéntame si quieres repasar algo puntual o pedir otro control.")
+        partes.append("¡Mucho éxito! Cuando termines, cuéntame si quieres repasar algo puntual o hacer otra prueba.")
 
     return "\n\n".join(partes)
 
@@ -1649,14 +1773,15 @@ prompt_sugerido = None
 # por schema) en vez de esperar a que el modelo decida solo escribir los bloques quiz/pareados —
 # ver la nota junto a ControlGeneradoSchema en tutor_core.py sobre por qué se cambió de enfoque.
 control_pendiente = None
+pedido_prueba_banner = None  # texto del campo del banner si el estudiante pulsó "¡Quiero hacer una prueba!"
 
-# --- BANNER LLAMATIVO: INVITACIÓN AL "CONTROL COMPLETO" (8 selección múltiple + 8 pareados) ---
+# --- BANNER LLAMATIVO: INVITACIÓN A LA PRUEBA (clase: 10 + 10 / unidad: 24 + 10) ---
 st.markdown(
     '<div class="cognimorph-banner-control">'
     '<div class="titulo-banner">🎯 ¿Te sientes list@ para ponerte a prueba?</div>'
-    '<div class="texto-banner">Cuando te sientas list@, cuéntame de qué clase o tema quieres tu '
-    "<b>control</b> (o déjalo en blanco para que sea de todo lo visto hasta ahora) y te armo 8 "
-    "preguntas de selección múltiple + 8 términos pareados, con el resultado al instante.</div></div>",
+    '<div class="texto-banner">Cuando te sientas list@, cuéntame si quieres tu <b>prueba</b> de una '
+    "<b>clase</b> (10 preguntas de selección múltiple + 10 términos pareados) o de toda una "
+    "<b>unidad</b> (24 preguntas + 10 términos pareados), con el resultado al instante.</div></div>",
     unsafe_allow_html=True,
 )
 contenedor_boton_control = st.container(key="cognimorph_btn_control_completo")
@@ -1664,11 +1789,13 @@ with contenedor_boton_control:
     tema_control_input = st.text_input(
         "¿De qué clase o tema quieres el control?",
         key="cognimorph_tema_control_input",
-        placeholder="Ej: fisiología renal, o toda la unidad 2… (déjalo en blanco = todo lo visto)",
+        placeholder="Ej: clase 6, o unidad 4… (si lo dejas en blanco, te pregunto)",
         label_visibility="collapsed",
     )
-    if st.button("🚀 ¡Quiero hacer un control!", key="cognimorph_btn_control_completo_click", use_container_width=True):
-        control_pendiente = {"tema": tema_control_input, "n_preguntas": 8, "n_pareados": 8}
+    if st.button("🚀 ¡Quiero hacer una prueba!", key="cognimorph_btn_control_completo_click", use_container_width=True):
+        # El alcance (clase o unidad) y la cantidad de preguntas se resuelven más abajo, junto a los demás
+        # pedidos de prueba (ver _resolver_pedido_prueba).
+        pedido_prueba_banner = tema_control_input or ""
 
 # --- BOTONES DE ACCIÓN RÁPIDA (SUGERENCIAS Y CRONOGRAMA) ---
 st.markdown("💡 **Acciones y consultas rápidas:**")
@@ -1722,6 +1849,45 @@ for idx, m in enumerate(st.session_state.mensajes):
 texto_chat_input = st.chat_input("Escribe tu duda, pide un quiz o consulta el cronograma...")
 texto_a_enviar = prompt_sugerido or texto_chat_input
 
+def _turno_fijo_del_tutor(texto_usuario, texto_tutor):
+    """Agrega al chat un intercambio con texto fijo (sin llamar al modelo): lo que dijo el estudiante y la respuesta."""
+    st.session_state.mensajes.append({"role": "user", "content": texto_usuario})
+    with st.chat_message("user", avatar="👤"):
+        st.markdown(texto_usuario)
+    with st.chat_message("assistant", avatar=ruta_avatar):
+        mostrar_respuesta_tutor(
+            texto_tutor, key_sufijo=f"nueva_{len(st.session_state.mensajes)}",
+            asignatura_sel=asignatura_sel, ruta_logo=ruta_udla, materiales_disponibles=materiales_disponibles,
+            es_respuesta_nueva=True, permitir_descarga=False,
+        )
+    st.session_state.mensajes.append({"role": "assistant", "content": texto_tutor})
+
+
+# --- PRUEBAS: ¿el tutor acaba de ofrecer una prueba y el estudiante responde con el alcance? ---
+# (o pulsó el botón del banner). Se resuelve en código: clase -> 10 + 10, unidad -> 24 + 10.
+_estado_alcance = st.session_state.get("esperando_alcance_control")  # None | {"eval": nombre_o_None}
+if control_pendiente is None and pedido_prueba_banner is not None:
+    accion_p, dato_p = _resolver_pedido_prueba(pedido_prueba_banner, cod_materia)
+    if accion_p == "generar":
+        control_pendiente = dato_p
+        st.session_state.esperando_alcance_control = None
+    else:
+        _turno_fijo_del_tutor("Quiero hacer una prueba.", dato_p)
+        st.session_state.esperando_alcance_control = {"eval": None}
+elif control_pendiente is None and texto_a_enviar and _estado_alcance:
+    accion_p, dato_p = _resolver_pedido_prueba(
+        texto_a_enviar, cod_materia, solo_si_claro=True, evaluacion_sugerida=_estado_alcance.get("eval"),
+    )
+    if accion_p == "generar":
+        control_pendiente = dato_p
+        st.session_state.esperando_alcance_control = None
+        texto_a_enviar = None
+    elif accion_p == "preguntar":
+        _turno_fijo_del_tutor(texto_a_enviar, dato_p)
+        texto_a_enviar = None
+    else:
+        st.session_state.esperando_alcance_control = None  # escribió otra cosa: sigue el flujo normal
+
 # Si el mensaje pregunta por el CONTENIDO de una evaluación puntual (ej. "¿qué contenidos entran en
 # el CAT 1?"), la respuesta se busca directo en contenidos_evaluaciones.json en vez de pedírsela al
 # tutor conversacional — ver la nota junto a _PATRON_PREGUNTA_CONTENIDO_EVALUACION más arriba sobre
@@ -1739,8 +1905,10 @@ if control_pendiente is None and texto_a_enviar and _PATRON_PREGUNTA_CONTENIDO_E
             + (f" (ponderación {ponderacion_eval})" if ponderacion_eval else "")
             + " son:\n\n"
             + "\n".join(f"- {c}" for c in entrada_eval.get("contenidos", []))
-            + "\n\n¿Quieres que repasemos alguno de estos temas, o armamos un mini control de esto para practicar?"
+            + "\n\n¿Quieres que repasemos alguno de estos temas, o te armo una prueba de esto para practicar? "
+            "(Si me dices que sí, la armo con estos contenidos.)"
         )
+        st.session_state.esperando_alcance_control = {"eval": entrada_eval.get("evaluacion")}
         st.session_state.mensajes.append({"role": "user", "content": texto_a_enviar})
         with st.chat_message("user", avatar="👤"):
             st.markdown(texto_a_enviar)
@@ -1760,22 +1928,25 @@ if control_pendiente is None and texto_a_enviar and _PATRON_PREGUNTA_CONTENIDO_E
 if (
     control_pendiente is None
     and texto_a_enviar
-    and _PATRON_SOLICITUD_CONTROL.search(texto_a_enviar)
-    and not _PATRON_PREGUNTA_FECHA_CONTROL.search(texto_a_enviar)
+    and _es_pedido_de_prueba(texto_a_enviar)
 ):
-    control_pendiente = {
-        "tema": _extraer_tema_control(texto_a_enviar),
-        "n_preguntas": 8,
-        "n_pareados": 8,
-    }
+    accion_p, dato_p = _resolver_pedido_prueba(texto_a_enviar, cod_materia)
+    if accion_p == "generar":
+        control_pendiente = dato_p
+        st.session_state.esperando_alcance_control = None
+    else:
+        # Falta saber de qué clase o unidad: se pregunta (y se recuerda para entender la respuesta).
+        _turno_fijo_del_tutor(texto_a_enviar, dato_p)
+        st.session_state.esperando_alcance_control = {"eval": None}
     texto_a_enviar = None
 
 if control_pendiente is not None:
     tema_control = (control_pendiente.get("tema") or "").strip()
+    plan_control_actual = control_pendiente.get("plan")
     texto_usuario_mostrado = (
-        f"Quiero hacer un control de: {tema_control}"
+        f"Quiero hacer una prueba de {tema_control}"
         if tema_control
-        else "Quiero hacer un control de todo lo visto hasta ahora."
+        else "Quiero hacer una prueba de todo lo visto hasta ahora."
     )
     historial_previo = list(st.session_state.mensajes)  # turnos ANTES de esta pregunta
     st.session_state.mensajes.append({"role": "user", "content": texto_usuario_mostrado})
@@ -1783,9 +1954,13 @@ if control_pendiente is not None:
         st.markdown(texto_usuario_mostrado)
 
     with st.chat_message("assistant", avatar=ruta_avatar):
-        with st.spinner("CogniMorph armando tu control..."):
+        with st.spinner("CogniMorph armando tu prueba..."):
             tutor = TutorCore(api_key=api_key)
-            contexto_material = cargar_textos_pdfs_materia(cod_materia)
+            # Con un plan (clase o unidad) se leen SOLO los PDF de esas clases, para no mezclar contenidos.
+            contexto_material = cargar_textos_pdfs_materia(
+                cod_materia,
+                solo_clases=[c["n"] for c in plan_control_actual["clases"]] if plan_control_actual else None,
+            )
             if st.session_state.contexto_pdf_manual:
                 contexto_material += "\n" + st.session_state.contexto_pdf_manual
 
@@ -1797,6 +1972,7 @@ if control_pendiente is not None:
                 contexto_material=contexto_material,
                 cronograma=cargar_cronograma(cod_materia),
                 contenidos_evaluaciones=cargar_contenidos_evaluaciones(cod_materia),
+                plan=plan_control_actual,
             )
             if error_control:
                 respuesta = error_control
@@ -1839,6 +2015,11 @@ elif texto_a_enviar:
                 materiales_disponibles=materiales_disponibles,
                 contenidos_evaluaciones=cargar_contenidos_evaluaciones(cod_materia),
             )
+            # Si el tutor ofreció una prueba (marca interna), se oculta la marca y se recuerda para entender
+            # la próxima respuesta del estudiante (ver _resolver_pedido_prueba).
+            respuesta, ofrecio_prueba = _separar_marca_oferta_prueba(respuesta)
+            if ofrecio_prueba:
+                st.session_state.esperando_alcance_control = {"eval": None}
             mostrar_respuesta_tutor(
                 respuesta, key_sufijo=f"nueva_{len(st.session_state.mensajes)}",
                 asignatura_sel=asignatura_sel, ruta_logo=ruta_udla, materiales_disponibles=materiales_disponibles,
