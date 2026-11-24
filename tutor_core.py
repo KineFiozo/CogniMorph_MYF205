@@ -452,6 +452,33 @@ def clases_de_evaluacion(entrada_evaluacion, unidades):
     return sorted(dict.fromkeys(encontradas))
 
 
+
+def clases_relevantes(texto_actual, mensajes_previos, unidades, max_turnos=6):
+    """
+    Números de las clases de las que se está hablando, para enviarle al modelo SOLO esos PDF en vez de
+    las 12 clases en cada mensaje (cada mensaje con todo el material pesaba ~50 mil tokens y topaba el
+    límite por minuto del plan gratuito de Gemini). Primero mira el mensaje actual; si no nombra ninguna
+    clase, revisa los últimos mensajes del estudiante (así "sigamos" o "explícame más" conservan la clase).
+    Devuelve [] si no se puede deducir (entonces la app envía un resumen reducido de todas las clases).
+    """
+    def _de(texto):
+        a = interpretar_alcance(texto, unidades)
+        if a["modo"] in ("clase", "varias", "unidad"):
+            return a["clases"]
+        if a["modo"] == "ambiguo" and a["candidatas"]:
+            return a["candidatas"]
+        return []
+
+    encontradas = _de(texto_actual)
+    if encontradas:
+        return encontradas
+    for m in reversed((mensajes_previos or [])[-max_turnos:]):
+        if m.get("role") == "user":
+            encontradas = _de(m.get("content") or "")
+            if encontradas:
+                return encontradas
+    return []
+
 def _repartir(total, partes):
     """Reparte 'total' en 'partes' lo más parejo posible (el resto va a las primeras)."""
     base, resto = divmod(total, partes)
@@ -970,7 +997,10 @@ def elegir_modelos_a_intentar(client):
         for m in client.models.list():
             acciones = getattr(m, "supported_actions", None) or []
             nombre = (getattr(m, "name", "") or "").replace("models/", "")
-            if nombre and "generateContent" in acciones and not any(x in nombre.lower() for x in excluir):
+            # Solo modelos de la familia "gemini-*": la API también lista agentes y modelos especiales
+            # ("deep-research...", "antigravity...") que no sirven para chatear y suelen venir sin cuota.
+            if (nombre.lower().startswith("gemini-") and "generateContent" in acciones
+                    and not any(x in nombre.lower() for x in excluir)):
                 disponibles.append(nombre)
 
         def prioridad(nombre):
@@ -995,12 +1025,41 @@ def _es_error_de_cuota(error):
     return "429" in t or "RESOURCE_EXHAUSTED" in t or "quota" in t.lower()
 
 
+def _segundos_de_espera(texto_error):
+    """Segundos de espera que sugiere Google en un error 429 ('retry in 28.5s' / retryDelay '28s'); None si no hay."""
+    m = re.search(r"retry in ([\d.]+)\s*s", str(texto_error), re.IGNORECASE) or re.search(
+        r"retryDelay'?\"?:\s*'?\"?(\d+)s", str(texto_error)
+    )
+    try:
+        return float(m.group(1)) if m else None
+    except (TypeError, ValueError):
+        return None
+
+
 MENSAJE_CUOTA_AGOTADA = (
     "⏳ CogniMorph llegó al límite de uso gratuito de la IA (Gemini) por ahora, así que no puedo "
     "responderte en este momento. El cupo diario se renueva solo cada día a la medianoche (hora del "
     "Pacífico, es decir, de madrugada en Chile), así que puedes volver a intentarlo más tarde o mañana. "
     "Si estás usando CogniMorph en una demostración o necesitas que funcione ya, avísale a tu docente."
 )
+
+MENSAJE_CUOTA_POR_MINUTO = (
+    "⏳ Estoy recibiendo muchas consultas seguidas y llegué al límite por minuto de la IA (Gemini). "
+    "Espera unos {seg} segundos y vuelve a enviar tu mensaje; debería funcionar. "
+    "Si te pasa seguido, avísale a tu docente."
+)
+
+
+def _mensaje_por_cuota(errores):
+    """
+    Mensaje amable cuando ningún modelo respondió y al menos uno falló por cuota. Si Google informa una
+    espera corta (límite por minuto), se pide esperar ese rato; si no, se explica el límite diario.
+    'errores' es la lista de textos de error de los modelos que fallaron por cuota.
+    """
+    esperas = [e for e in (_segundos_de_espera(x) for x in errores) if e is not None]
+    if esperas and min(esperas) <= 180:
+        return MENSAJE_CUOTA_POR_MINUTO.format(seg=int(min(esperas)) + 5)
+    return MENSAJE_CUOTA_AGOTADA
 
 
 class TutorCore:
@@ -1127,7 +1186,7 @@ class TutorCore:
         modelos_a_probar = elegir_modelos_a_intentar(client)
 
         ultimo_error = ""
-        solo_cuota = True  # True mientras TODOS los fallos hayan sido por cuota agotada
+        errores_cuota = []  # textos de error de los modelos que fallaron por cuota
         for nombre_modelo in modelos_a_probar:
             try:
                 response = client.models.generate_content(
@@ -1137,15 +1196,14 @@ class TutorCore:
                 )
                 if response and response.text:
                     return response.text
-                solo_cuota = False
             except Exception as e:
                 ultimo_error = f"{nombre_modelo}: {e}"
-                if not _es_error_de_cuota(e):
-                    solo_cuota = False
+                if _es_error_de_cuota(e):
+                    errores_cuota.append(str(e))
                 continue
 
-        if solo_cuota and ultimo_error:
-            return MENSAJE_CUOTA_AGOTADA
+        if errores_cuota:
+            return _mensaje_por_cuota(errores_cuota)
         return f"⚠️ No se pudo conectar con ningún modelo de Gemini. Detalle: {ultimo_error}"
 
     def generar_control(self, tema, n_preguntas=8, n_pareados=8, historial_chat=None,
@@ -1252,7 +1310,7 @@ class TutorCore:
         modelos_a_probar = elegir_modelos_a_intentar(client)
         ultimo_error = ""
         mejor_parcial = {"datos": None, "puntaje": -1}
-        errores_no_cuota = [False]  # pasa a True si algún fallo NO fue por cuota agotada
+        errores_cuota = []  # textos de error de los modelos que fallaron por cuota
 
         def _cumple(datos):
             """True si el control trae al menos la cantidad pedida (y la deja exacta); si no, guarda el mejor intento
@@ -1294,8 +1352,8 @@ class TutorCore:
             except Exception as e:
                 ultimo_error = f"{nombre_modelo} (con schema): {e}"
                 if _es_error_de_cuota(e):
+                    errores_cuota.append(str(e))
                     continue  # sin cuota en este modelo: no gastar los otros 2 intentos, probar el siguiente
-                errores_no_cuota[0] = True
 
             # Intento 2: mismo modelo, forzando solo JSON (sin schema) — por si esta versión del
             # SDK o este modelo puntual no soporta response_schema.
@@ -1312,8 +1370,8 @@ class TutorCore:
             except Exception as e:
                 ultimo_error = f"{nombre_modelo} (json sin schema): {e}"
                 if _es_error_de_cuota(e):
+                    errores_cuota.append(str(e))
                     continue
-                errores_no_cuota[0] = True
 
             # Intento 3: último recurso — sin ningún parámetro de configuración especial, pidiendo
             # el JSON explícitamente por texto y extrayendo a mano el primer bloque {...}.
@@ -1333,13 +1391,13 @@ class TutorCore:
                             return d, None
             except Exception as e:
                 ultimo_error = f"{nombre_modelo} (extracción manual): {e}"
-                if not _es_error_de_cuota(e):
-                    errores_no_cuota[0] = True
+                if _es_error_de_cuota(e):
+                    errores_cuota.append(str(e))
                 continue
 
         if mejor_parcial["datos"] is not None:
             # Ningún intento trajo la cantidad exacta: se entrega el que más se acercó antes que nada.
             return mejor_parcial["datos"], None
-        if ultimo_error and not errores_no_cuota[0]:
-            return None, MENSAJE_CUOTA_AGOTADA
+        if errores_cuota:
+            return None, _mensaje_por_cuota(errores_cuota)
         return None, f"⚠️ No se pudo generar el control. Detalle: {ultimo_error}"
