@@ -9,3 +9,5 @@ requests>=2.32.0
 pypdf>=4.2.0
 reportlab>=4.2.0
 Pillow>=10.0.0
+# Zona horaria de Chile para la fecha actual del tutor (necesario en Windows; inofensivo en Linux)
+tzdata>=2024.1
