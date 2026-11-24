@@ -230,6 +230,65 @@ def bloque_fecha_actual(cronograma=None, hoy=None):
     return "\n".join(lineas)
 
 
+def _enriquecer_materiales(materiales, cronograma=None):
+    """
+    Arma las fichas que ve el modelo agregando, de forma automática, el contexto que a las fichas
+    les falta: a qué Hito pertenece cada audio/video, de qué clase es (según el cronograma) y cuál
+    es el tema real del Hito. Sin esto, una canción o un video con título corto ("Conexiones",
+    "Encéfalo") no "calzaba" con la conversación y solo se ofrecía el podcast, que sí tiene un
+    título descriptivo — aunque los tres sean formatos del MISMO tema.
+    """
+    fichas = [m for m in materiales if m.get("id") and m.get("existe")]
+
+    def _hito(m):
+        r = re.match(r"^hito\s*_?\s*(\d+)", str(m.get("id", "")), re.IGNORECASE)
+        return int(r.group(1)) if r else None
+
+    # tema descriptivo de cada Hito: el del podcast (suele ser el más explícito), si no el primero.
+    temas_hito = {}
+    for m in fichas:
+        h = _hito(m)
+        if h is None:
+            continue
+        if h not in temas_hito or (m.get("tipo") == "podcast" and m.get("tema")):
+            temas_hito[h] = m.get("tema") or temas_hito.get(h)
+
+    def _clase_de(h):
+        """'U4:C6: Neuroanatomía I' -> 'Clase 6: Neuroanatomía I' (solo si el cronograma la trae)."""
+        if not isinstance(cronograma, dict):
+            return None
+        patron = re.compile(r"(?<![0-9A-Za-z])C%d\s*[:.]\s*(.+)" % h)
+        textos = []
+        for dia in cronograma.get("dias", []) or []:
+            textos.append(((dia.get("catedra") or {}).get("contenido")) or "")
+        for sem in cronograma.get("semanas", []) or []:
+            textos.extend(sem.get("catedra") or [])
+        for t in textos:
+            r = patron.search(str(t))
+            if r:
+                return f"Clase {h}: {r.group(1).strip()}"
+        return None
+
+    resumen = []
+    for m in fichas:
+        h = _hito(m)
+        ficha = {
+            "id": m.get("id"),
+            "tipo": m.get("tipo"),
+            "tema": m.get("tema"),
+            "titulo": m.get("titulo"),
+            "descripcion": m.get("descripcion"),
+        }
+        if h is not None:
+            ficha["hito"] = h
+            ficha["tema_del_hito"] = temas_hito.get(h)
+            clase = _clase_de(h)
+            if clase:
+                ficha["clase_asociada"] = clase
+        resumen.append(ficha)
+    return resumen
+
+
 PROMPT_PEDAGOGICO = """
 Eres 'TutorSocrático', pero pensado como ese compañero de curso que se sabe la materia increíble y
 al que todos le preguntan porque explica bien y da gusto conversar con él — no como un profesor que
@@ -458,6 +517,13 @@ CÓMO CONVERSAR:
      ese mismo mensaje, no esperes a que el estudiante pregunte por él ni dejes pasar el turno. En
      cualquiera de los dos casos: no lo repitas si ya lo ofreciste antes en esta misma conversación y el
      estudiante no dijo que sí.
+   - MISMO HITO = MISMO TEMA: los materiales con el mismo número de "hito" (podcast, canción, video)
+     son tres formatos del MISMO contenido. Para decidir si calzan con lo que se está viendo, no te
+     fijes solo en el "tema" literal de cada ficha (una canción puede llamarse solo "Conexiones"):
+     usa "tema_del_hito" y "clase_asociada". Si calza uno del Hito, calzan todos los de ese Hito: en
+     vez de ofrecer solo el podcast, ofrece juntos los formatos que existan (podcast, canción y/o
+     video), nombrando cada uno con su "titulo". Ofrece los materiales del Hito cuya clase_asociada
+     corresponde a lo que se está estudiando, no de otro Hito solo porque comparta alguna palabra.
    - Nunca describas un material de forma distinta a lo que dice su "descripcion" en la ficha.
    - Recién CUANDO el estudiante confirme que quiere escuchar o ver uno que SÍ está en la lista, agrega
      en tu respuesta (no antes) un bloque como este por cada material pedido, usando el "id" EXACTO tal
@@ -569,6 +635,11 @@ TONO — MUY IMPORTANTE:
   acartonado, repetitivo o como una lista de trámites.
 - La cercanía es de forma, no de contenido: la terminología anatómica/fisiológica sigue siendo la
   oficial y precisa siempre, el tono cálido no reemplaza el rigor científico.
+- CÓMO NOMBRAR LAS CLASES Y EL MATERIAL DEL CURSO: nunca suenes a sistema. Está PROHIBIDO mostrarle
+  al estudiante marcas técnicas como "=== CLASE (archivo: ...) ===", nombres de archivo (.pdf, _REV),
+  ids de materiales o frases tipo "lo puedes revisar en [encabezado]". Refiérete a la clase como la
+  llamaría un compañero: "esto lo vimos en la Clase 4 (cavidad nasal)", "está en tus láminas de la
+  clase de neuroanatomía". Si no necesitas decir dónde está, no lo menciones: explica y ya.
 - Reconoce el esfuerzo del estudiante con naturalidad (sin exagerar ni sonar condescendiente), y
   transmite que preguntarte vale la pena — el objetivo es que quiera volver, no que sienta que cada
   intercambio es una evaluación.
@@ -694,17 +765,7 @@ class TutorCore:
             )
 
         if materiales:
-            resumen_materiales = [
-                {
-                    "id": m.get("id"),
-                    "tipo": m.get("tipo"),
-                    "tema": m.get("tema"),
-                    "titulo": m.get("titulo"),
-                    "descripcion": m.get("descripcion"),
-                }
-                for m in materiales
-                if m.get("id") and m.get("existe")
-            ]
+            resumen_materiales = _enriquecer_materiales(materiales, cronograma)
             if resumen_materiales:
                 bloques.append(
                     "MATERIALES_DE_APOYO_DISPONIBLES (usa SOLO estos; el campo 'id' es literal, "
@@ -750,6 +811,10 @@ class TutorCore:
                 "mezcles ni asumas contenido de una clase distinta a la que el estudiante pregunta; si "
                 "no encuentras el encabezado de la clase pedida en este material, dilo explícitamente "
                 "en vez de usar contenido de otra clase.\n"
+                "OJO: esos encabezados son marcas INTERNAS solo para ti. NUNCA los copies al estudiante: "
+                "ni '===', ni 'archivo:', ni el nombre del archivo (.pdf, _REV, etc.). Si quieres "
+                "remitirlo a su material, dilo como lo diría un compañero: 'esto lo viste en la Clase 1 "
+                "(Osteología y artrología del neurocráneo)' o 'échale un ojo a tus láminas de esa clase'.\n"
                 f"{contexto_material}\n-------------------\n\n"
             )
         mensaje_actual += f"Pregunta del estudiante: {pregunta_usuario}"
