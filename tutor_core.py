@@ -363,14 +363,37 @@ def estructura_unidades(cronograma):
                 if m:
                     _agregar(u, int(m.group(1)), m.group(2))
 
+    # Nombres alternativos de una clase (ej. cómo la llamaba antes el cronograma o cómo la nombran los
+    # estudiantes). Van en cronograma.json → meta → "sinonimos_clases": {"5": ["Miología de Cabeza", "SMAS"]}.
+    sin_raw = ((cronograma or {}).get("meta") or {}).get("sinonimos_clases") if isinstance(cronograma, dict) else None
+    sin_raw = sin_raw if isinstance(sin_raw, dict) else {}
+
+    def _sinonimos(n):
+        lista = sin_raw.get(str(n)) or []
+        return [str(x).strip() for x in lista if str(x).strip()] if isinstance(lista, list) else []
+
     return [
         {
             "numero": u,
             "etiqueta": f"Unidad {u}",
-            "clases": [{"n": n, "nombre": nom} for n, nom in sorted(unidades[u].items())],
+            "clases": [{"n": n, "nombre": nom, "sinonimos": _sinonimos(n)} for n, nom in sorted(unidades[u].items())],
         }
         for u in sorted(unidades)
     ]
+
+
+def _puntaje_clase(clase, palabras):
+    """
+    Cuántas raíces de 'palabras' coinciden con el nombre de la clase. Un sinónimo cuenta solo si se
+    nombró completo (todas sus raíces), así "miología de cabeza" identifica la clase 5 pero
+    "miología cervical" no la confunde con ella.
+    """
+    p = len(palabras & _tallos(clase["nombre"]))
+    for sin in clase.get("sinonimos") or []:
+        ts = _tallos(sin)
+        if ts and ts <= palabras:
+            p = max(p, len(ts))
+    return p
 
 
 def _todas_las_clases(unidades):
@@ -419,7 +442,7 @@ def interpretar_alcance(texto, unidades):
     # 4) por nombre de clase ("cavidad nasal", "laringe", "fisiología renal")
     palabras = _tallos(texto)
     if palabras:
-        puntajes = {c["n"]: len(palabras & _tallos(c["nombre"])) for c in todas}
+        puntajes = {c["n"]: _puntaje_clase(c, palabras) for c in todas}
         mejor = max(puntajes.values())
         if mejor > 0:
             ganadoras = sorted(n for n, p in puntajes.items() if p == mejor)
@@ -442,9 +465,18 @@ def clases_de_evaluacion(entrada_evaluacion, unidades):
         if m and int(m.group(1)) in validos:
             encontradas.append(int(m.group(1)))
             continue
+        # Nombre exacto de la clase (sin el prefijo "U4:"): gana siempre. Así "Neuroanatomía I" y
+        # "Neuroanatomía II" no se confunden entre sí por compartir casi todas las palabras.
+        sin_prefijo = _norm(re.sub(r"^\s*U\s*\d+\s*:\s*", "", str(item))).strip(" .")
+        exactas = [c["n"] for c in todas
+                   if sin_prefijo and sin_prefijo in {_norm(c["nombre"]).strip(" ."),
+                                                      *(_norm(x).strip(" .") for x in (c.get("sinonimos") or []))}]
+        if len(exactas) == 1:
+            encontradas.append(exactas[0])
+            continue
         palabras = _tallos(item)
         if palabras:
-            puntajes = {c["n"]: len(palabras & _tallos(c["nombre"])) for c in todas}
+            puntajes = {c["n"]: _puntaje_clase(c, palabras) for c in todas}
             mejor = max(puntajes.values())
             ganadoras = [n for n, p in puntajes.items() if p == mejor]
             if mejor > 0 and len(ganadoras) == 1:
