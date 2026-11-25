@@ -168,7 +168,34 @@ def get_base64_image(image_path):
 
 ruta_udla = buscar_imagen_inteligente(["udla", "universidad"])
 ruta_cognimorph = buscar_imagen_inteligente(["cogni", "morph", "banner"]) or buscar_imagen_inteligente(["dmyf"])
-ruta_avatar = buscar_imagen_inteligente(["avatar", "icono", "hex", "dmyf", "cogni"]) or "🧠"
+def _preparar_avatar_cuadrado(ruta):
+    """
+    El avatar del chat es un cuadrito/círculo pequeño. Si la imagen no es cuadrada (el hexágono de
+    DMYF es vertical, 529x613), Streamlit la recorta y se ve incompleta. Acá se centra la imagen
+    completa en un lienzo cuadrado blanco con un margen, para que el hexágono se vea entero.
+    Además se elige SIEMPRE un archivo "avatar" (antes podía tomar el logo horizontal cognimorph.png
+    según el orden en que el sistema listara los archivos).
+    """
+    try:
+        from PIL import Image
+        im = Image.open(ruta).convert("RGBA")
+        bbox = im.getbbox()
+        if bbox:
+            im = im.crop(bbox)
+        w, h = im.size
+        lado = int(max(w, h) * 1.12)
+        lienzo = Image.new("RGBA", (lado, lado), (255, 255, 255, 255))
+        lienzo.paste(im, ((lado - w) // 2, (lado - h) // 2), im)
+        return lienzo.resize((256, 256), Image.LANCZOS).convert("RGB")
+    except Exception:
+        return ruta
+
+_ruta_avatar_origen = (
+    buscar_imagen_inteligente(["avatar"])
+    or buscar_imagen_inteligente(["icono", "hex"])
+    or buscar_imagen_inteligente(["dmyf"])
+)
+ruta_avatar = _preparar_avatar_cuadrado(_ruta_avatar_origen) if _ruta_avatar_origen else "🧠"
 
 logo_udla_b64 = get_base64_image(ruta_udla)
 udla_img_html = f'<img src="data:image/png;base64,{logo_udla_b64}" style="height: 38px;">' if logo_udla_b64 else '<span style="color:#EA580C; font-weight:bold; font-size:1.4rem;">UDLA</span>'
@@ -342,6 +369,29 @@ st.markdown(f"""
         margin-bottom: 40px !important;
     }}
 
+    /* Avatar del chat: más grande, circular y sin recortar la imagen (cubre versiones de Streamlit
+       donde el avatar es el <img> mismo o un contenedor con <img> adentro) */
+    [data-testid="stChatMessageAvatarImage"],
+    [data-testid="stChatMessageAvatarAssistant"],
+    [data-testid="stChatMessageAvatarUser"] {{
+        width: 2.9rem !important;
+        height: 2.9rem !important;
+        box-sizing: border-box !important;
+        background: #FFFFFF !important;
+        border: 2px solid #FDBA74 !important;
+        border-radius: 50% !important;
+        overflow: hidden !important;
+    }}
+    [data-testid="stChatMessageAvatarImage"],
+    [data-testid="stChatMessageAvatarAssistant"] img {{
+        object-fit: contain !important;
+        padding: 3px !important;
+    }}
+    [data-testid="stChatMessageAvatarAssistant"] img {{
+        width: 100% !important;
+        height: 100% !important;
+    }}
+
     .udla-footer {{
         position: fixed;
         left: 0;
@@ -470,6 +520,77 @@ st.markdown(f"""
         padding: 8px 14px;
         border-radius: 8px;
     }}
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown("""
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap');
+    .stApp { font-family: 'Nunito', 'Segoe UI', system-ui, sans-serif; background-color: #F1F5FF;
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='80' height='92'><path d='M40 4l34 20v44L40 88 6 68V24z' fill='none' stroke='%23DDE6FF' stroke-width='2'/></svg>"); }
+    section[data-testid="stSidebar"] { background-color: #EEF2FF !important; border-right: none !important; }
+    section[data-testid="stSidebar"] > div { padding-top: 0.5rem; }
+    .block-container { padding-top: 1.2rem !important; }
+
+    /* Tarjetas 3D */
+    .logo-card, .logo-udla-card, .gam-card,
+    .st-key-card_asignatura, .st-key-card_estudiante, .st-key-card_guia {
+        background: #FFFFFF; border-radius: 22px; box-shadow: 0 6px 0 #E0E7FF; padding: 12px 14px; margin-bottom: 14px;
+    }
+    .logo-card img { width: 100%; display: block; }
+    .logo-udla-card { text-align: center; margin-top: 10px; }
+    .sidebar-card-title { color: #4338CA; font-weight: 800; font-size: 0.98rem; margin-bottom: 6px; }
+
+    /* Nivel / XP */
+    .gam-nivel { display: flex; align-items: center; gap: 12px; }
+    .gam-nivel-num { width: 54px; height: 54px; flex: none; border-radius: 50%; display: grid; place-items: center;
+        background: linear-gradient(135deg, #F97316, #FBBF24); color: #fff; font-weight: 900; font-size: 1.5rem; box-shadow: 0 4px 0 #C2410C; }
+    .gam-nivel-info { flex: 1; font-size: 0.95rem; color: #1E293B; }
+    .gam-nivel-info span { font-size: 0.74rem; color: #64748B; }
+    .gam-xp { height: 10px; background: #E0E7FF; border-radius: 99px; margin: 5px 0 3px; overflow: hidden; }
+    .gam-xp i { display: block; height: 100%; background: #22C55E; border-radius: 99px; transition: width .6s ease; }
+    .gam-titulo { color: #4338CA; font-weight: 800; font-size: 0.95rem; margin-bottom: 8px; }
+    .gam-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .gam-ins { text-align: center; border-radius: 14px; padding: 8px 2px 6px; }
+    .gam-ins span { font-size: 1.7rem; line-height: 1.1; display: block; }
+    .gam-ins small { display: block; font-size: 0.64rem; font-weight: 700; line-height: 1.15; margin-top: 3px; }
+    .gam-ins.on { background: linear-gradient(135deg, #FFF7ED, #FFEDD5); border: 2px solid #FDBA74; color: #9A3412; }
+    .gam-ins.off { background: #F1F5F9; border: 2px dashed #CBD5E1; color: #94A3B8; }
+    .gam-ins.off span { filter: grayscale(1); opacity: .6; font-size: 1.4rem; }
+    .gam-reto { background: #EEF2FF; border: 2px solid #C7D2FE; font-size: 0.86rem; color: #312E81; box-shadow: 0 6px 0 #C7D2FE; }
+    section[data-testid="stSidebar"] [data-testid="stExpander"] { background: #FFFFFF; border: none !important; border-radius: 18px;
+        box-shadow: 0 6px 0 #E0E7FF; margin-bottom: 14px; }
+    section[data-testid="stSidebar"] [data-testid="stExpander"] summary { font-weight: 800; color: #4338CA; }
+
+    /* Ruta del curso */
+    .ruta-clases { margin-bottom: 14px; }
+    .ruta-titulo { font-weight: 800; color: #4338CA; font-size: 0.9rem; margin-bottom: 6px; }
+    .ruta-fila { display: flex; gap: 10px; flex-wrap: wrap; }
+    .ruta-chip { flex: 1; min-width: 120px; border-radius: 18px; padding: 9px 10px; text-align: center; font-weight: 800; font-size: 0.86rem; }
+    .ruta-chip small { display: block; font-weight: 600; font-size: 0.7rem; opacity: .85; margin-top: 2px; }
+    .ruta-chip.ok { background: #DCFCE7; color: #166534; box-shadow: 0 5px 0 #BBF7D0; }
+    .ruta-chip.ahora { background: linear-gradient(135deg, #F97316, #FB923C); color: #fff; box-shadow: 0 5px 0 #C2410C; }
+    .ruta-chip.prox { background: #FFFFFF; color: #64748B; box-shadow: 0 5px 0 #E0E7FF; }
+
+    /* Asignatura activa */
+    .active-subject-badge { background: #FFFFFF !important; border: 2px solid #C7D2FE !important; color: #3730A3 !important;
+        border-radius: 16px !important; box-shadow: 0 5px 0 #E0E7FF; }
+
+    /* Botones */
+    .stButton>button, .stDownloadButton>button { border: 2px solid #C7D2FE !important; color: #4338CA !important; background: #FFFFFF !important;
+        border-radius: 14px !important; box-shadow: 0 4px 0 #E0E7FF; font-weight: 800 !important; }
+    .stButton>button:hover, .stDownloadButton>button:hover { background: #F97316 !important; color: #FFFFFF !important;
+        border-color: #EA580C !important; box-shadow: 0 4px 0 #C2410C !important; transform: translateY(-1px); }
+
+    /* Chat */
+    [data-testid="stChatMessage"] { background: #FFFFFF; border-radius: 22px; box-shadow: 0 5px 0 #E0E7FF; padding: 14px 18px; margin-bottom: 12px; }
+    [data-testid="stChatMessage"]:has([aria-label="Chat message from user"]),
+    [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) { background: #4F46E5; box-shadow: 0 5px 0 #3730A3; }
+    [data-testid="stChatMessage"]:has([aria-label="Chat message from user"]) [data-testid="stChatMessageContent"] *,
+    [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) * { color: #FFFFFF !important; }
+    [data-testid="stBottom"], [data-testid="stBottom"] > div { background: transparent !important; }
+    [data-testid="stChatInput"] { border-radius: 20px !important; box-shadow: 0 5px 0 #E0E7FF; border: 2px solid #C7D2FE; background: #FFFFFF; }
+    .udla-footer { background-color: #312E81 !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -704,6 +825,243 @@ class StudentTracker:
         self.data["quizzes_intentos"] = self.data.get("quizzes_intentos", 0) + 1
         self.data["ultimo_puntaje"] = nota
         self.save()
+
+# --- GAMIFICACIÓN: nivel, XP e insignias (se calculan con acciones REALES del estudiante en la app) ---
+# El avance se guarda por estudiante (id de Blackboard) dentro de progreso_estudiante.json. OJO: en
+# Streamlit Community Cloud ese archivo se borra cuando la app se reinicia/redespliega; para que el
+# avance sea permanente hará falta una base de datos (pendiente, junto con la conexión a Blackboard).
+INSIGNIAS = [
+    {"id": "primer_paso", "icono": "🧠", "nombre": "Primer paso",
+     "como": "Haz tu primera consulta a CogniMorph."},
+    {"id": "curiosidad", "icono": "💬", "nombre": "Curiosidad activa",
+     "como": "Llega a 10 consultas."},
+    {"id": "oido", "icono": "🎧", "nombre": "Oído atento",
+     "como": "Escucha un podcast o una canción de apoyo."},
+    {"id": "cine", "icono": "🎬", "nombre": "Cine anatómico",
+     "como": "Mira un video de apoyo."},
+    {"id": "mapa", "icono": "🗺️", "nombre": "Mapa maestro",
+     "como": "Pídele a CogniMorph un mapa conceptual."},
+    {"id": "valiente", "icono": "📝", "nombre": "Valiente",
+     "como": "Completa tu primera prueba (selección múltiple o términos pareados)."},
+    {"id": "mente_brillante", "icono": "⭐", "nombre": "Mente brillante",
+     "como": "Logra 80 % o más en una prueba de 10 ítems o más."},
+    {"id": "desafio_unidad", "icono": "🏆", "nombre": "Desafío de unidad",
+     "como": "Completa una prueba de unidad completa (24 preguntas de selección múltiple)."},
+    {"id": "constancia", "icono": "🔥", "nombre": "Constancia",
+     "como": "Estudia con CogniMorph en 3 días distintos."},
+]
+NOMBRES_NIVEL = ["Explorador/a", "Aprendiz", "Analista", "Estratega", "Experto/a", "Maestro/a"]
+XP_POR_NIVEL = 100
+XP_CONSULTA, XP_MATERIAL, XP_MAPA, XP_PRUEBA_BASE, XP_POR_ACIERTO, XP_INSIGNIA = 10, 15, 15, 20, 2, 25
+
+
+def _hoy_chile_iso():
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("America/Santiago")).date().isoformat()
+    except Exception:
+        return datetime.now().date().isoformat()
+
+
+def _gam_registro():
+    """Registro de gamificación del estudiante activo (se crea si no existe)."""
+    tracker = st.session_state.tracker
+    por_alumno = tracker.data.setdefault("gamificacion", {})
+    sid = str(st.session_state.get("alumno_id_activo", "anonimo"))
+    g = por_alumno.setdefault(sid, {})
+    g.setdefault("xp", 0)
+    g.setdefault("consultas", 0)
+    g.setdefault("dias", [])
+    g.setdefault("audios", [])
+    g.setdefault("videos", [])
+    g.setdefault("mapas", 0)
+    g.setdefault("pruebas", {})
+    g.setdefault("insignias", {})
+    return g
+
+
+def _insignia_cumplida(ins_id, g):
+    pruebas = list(g["pruebas"].values())
+    if ins_id == "primer_paso":
+        return g["consultas"] >= 1
+    if ins_id == "curiosidad":
+        return g["consultas"] >= 10
+    if ins_id == "oido":
+        return len(g["audios"]) >= 1
+    if ins_id == "cine":
+        return len(g["videos"]) >= 1
+    if ins_id == "mapa":
+        return g["mapas"] >= 1
+    if ins_id == "valiente":
+        return len(pruebas) >= 1
+    if ins_id == "mente_brillante":
+        return any(p["total"] >= 10 and p["aciertos"] / max(p["total"], 1) >= 0.8 for p in pruebas)
+    if ins_id == "desafio_unidad":
+        return any(p.get("tipo") == "quiz" and p["total"] >= 24 for p in pruebas)
+    if ins_id == "constancia":
+        return len(g["dias"]) >= 3
+    return False
+
+
+def _nivel_de(xp):
+    return 1 + xp // XP_POR_NIVEL
+
+
+def gam_evento(evento, **kw):
+    """Registra una acción del estudiante, suma XP, entrega insignias y deja avisos pendientes (toasts)."""
+    try:
+        g = _gam_registro()
+        nivel_antes = _nivel_de(g["xp"])
+        if evento == "consulta":
+            g["consultas"] += 1
+            g["xp"] += XP_CONSULTA
+            hoy = _hoy_chile_iso()
+            if hoy not in g["dias"]:
+                g["dias"].append(hoy)
+        elif evento == "material":
+            lista = g["videos"] if kw.get("tipo") == "video" else g["audios"]
+            if kw.get("id") not in lista:
+                lista.append(kw.get("id"))
+                g["xp"] += XP_MATERIAL
+        elif evento == "mapa":
+            g["mapas"] += 1
+            g["xp"] += XP_MAPA
+        elif evento == "prueba":
+            clave = kw["clave"]
+            if clave in g["pruebas"]:
+                return
+            g["pruebas"][clave] = {"aciertos": int(kw["aciertos"]), "total": int(kw["total"]), "tipo": kw.get("tipo")}
+            g["xp"] += XP_PRUEBA_BASE + XP_POR_ACIERTO * int(kw["aciertos"])
+        else:
+            return
+        for ins in INSIGNIAS:
+            if ins["id"] not in g["insignias"] and _insignia_cumplida(ins["id"], g):
+                g["insignias"][ins["id"]] = _hoy_chile_iso()
+                g["xp"] += XP_INSIGNIA
+                st.session_state.setdefault("gam_toasts", []).append(
+                    (f"¡Nueva insignia: {ins['nombre']}! {ins['como']}", ins["icono"])
+                )
+        nivel_despues = _nivel_de(g["xp"])
+        if nivel_despues > nivel_antes:
+            nombre = NOMBRES_NIVEL[min(nivel_despues, len(NOMBRES_NIVEL)) - 1]
+            st.session_state.setdefault("gam_toasts", []).append(
+                (f"¡Subiste al nivel {nivel_despues} · {nombre}!", "🚀")
+            )
+        st.session_state.tracker.save()
+    except Exception:
+        pass  # la gamificación nunca debe romper el chat
+
+
+def registrar_consulta_gam():
+    st.session_state.tracker.registrar_consulta()
+    gam_evento("consulta")
+
+
+def mostrar_toasts_pendientes():
+    pendientes = st.session_state.get("gam_toasts") or []
+    st.session_state.gam_toasts = []
+    for mensaje, icono in pendientes:
+        try:
+            st.toast(mensaje, icon=icono)
+        except Exception:
+            pass
+
+
+def dibujar_panel_gamificacion(contenedor):
+    """Panel de nivel/XP/insignias en la barra lateral (se dibuja AL FINAL del script para mostrar lo recién ganado)."""
+    g = _gam_registro()
+    xp = g["xp"]
+    nivel = _nivel_de(xp)
+    nombre_nivel = NOMBRES_NIVEL[min(nivel, len(NOMBRES_NIVEL)) - 1]
+    en_nivel = xp % XP_POR_NIVEL
+    ganadas = [i for i in INSIGNIAS if i["id"] in g["insignias"]]
+    pendientes = [i for i in INSIGNIAS if i["id"] not in g["insignias"]]
+    with contenedor.container():
+        st.markdown(
+            '<div class="gam-card"><div class="gam-nivel">'
+            f'<div class="gam-nivel-num">{nivel}</div>'
+            f'<div class="gam-nivel-info"><b>{html.escape(nombre_nivel)}</b>'
+            f'<div class="gam-xp"><i style="width:{en_nivel}%"></i></div>'
+            f'<span>{en_nivel} / {XP_POR_NIVEL} XP para el nivel {nivel + 1}</span></div></div></div>',
+            unsafe_allow_html=True,
+        )
+        celdas = []
+        for ins in INSIGNIAS:
+            ok = ins["id"] in g["insignias"]
+            celdas.append(
+                f'<div class="gam-ins {"on" if ok else "off"}" title="{html.escape(ins["nombre"])}: {html.escape(ins["como"])}">'
+                f'<span>{ins["icono"] if ok else "🔒"}</span><small>{html.escape(ins["nombre"])}</small></div>'
+            )
+        st.markdown(
+            f'<div class="gam-card"><div class="gam-titulo">🏅 Mis insignias · {len(ganadas)} de {len(INSIGNIAS)}</div>'
+            f'<div class="gam-grid">{"".join(celdas)}</div></div>',
+            unsafe_allow_html=True,
+        )
+        if pendientes:
+            prox = pendientes[0]
+            st.markdown(
+                f'<div class="gam-card gam-reto"><div class="gam-titulo">🎯 Tu próximo desafío</div>'
+                f'<b>{prox["icono"]} {html.escape(prox["nombre"])}</b><br>{html.escape(prox["como"])}</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                '<div class="gam-card gam-reto"><div class="gam-titulo">🎉 ¡Las ganaste todas!</div>'
+                "Eres un/a crack de CogniMorph. ¡Sigue practicando para subir de nivel!</div>",
+                unsafe_allow_html=True,
+            )
+        with st.expander("🎯 Cómo ganar tus insignias", expanded=False):
+            for ins in INSIGNIAS:
+                ok = ins["id"] in g["insignias"]
+                st.markdown(f"{'✅' if ok else '🔒'} **{ins['icono']} {ins['nombre']}** — {ins['como']}")
+            st.markdown(
+                "---\n**⚡ ¿Cómo sumo XP?**\n\n"
+                f"- Cada consulta: **+{XP_CONSULTA} XP**\n"
+                f"- Abrir un material de apoyo nuevo (podcast, canción o video): **+{XP_MATERIAL} XP**\n"
+                f"- Recibir un mapa conceptual: **+{XP_MAPA} XP**\n"
+                f"- Completar una prueba: **+{XP_PRUEBA_BASE} XP** y **+{XP_POR_ACIERTO} XP** por cada acierto\n"
+                f"- Cada insignia nueva: **+{XP_INSIGNIA} XP**\n\n"
+                f"Cada {XP_POR_NIVEL} XP subes de nivel."
+            )
+
+
+def ruta_clases_html(cod_materia):
+    """Franja "Ruta del curso": clases alrededor de la semana actual según el cronograma (solo MYF205 por ahora)."""
+    try:
+        cron = cargar_cronograma(cod_materia)
+        dias = cron.get("dias") if isinstance(cron, dict) else None
+        if not dias:
+            return ""
+        hoy = _hoy_chile_iso()
+        clases = {}
+        for d in dias:
+            texto = ((d.get("catedra") or {}).get("contenido")) or ""
+            m = re.search(r"C(\d+)\s*:\s*(.+)", texto)
+            f = re.match(r"(\d{2})-(\d{2})-(\d{4})", d.get("fecha") or "")
+            if m and f:
+                clases[int(m.group(1))] = (f"{f.group(3)}-{f.group(2)}-{f.group(1)}", m.group(2).strip())
+        if not clases:
+            return ""
+        orden = sorted(clases)
+        pasadas = [n for n in orden if clases[n][0] <= hoy]
+        actual = max(pasadas) if pasadas else orden[0]
+        pos = orden.index(actual)
+        ini = max(0, min(pos - 2, len(orden) - 5))
+        ventana = orden[ini:ini + 5]
+        chips = []
+        for n in ventana:
+            titulo = clases[n][1]
+            corto = (titulo[:24] + "…") if len(titulo) > 25 else titulo
+            if n < actual:
+                chips.append(f'<div class="ruta-chip ok">✔ Clase {n}<small>{html.escape(corto)}</small></div>')
+            elif n == actual:
+                chips.append(f'<div class="ruta-chip ahora">▶ Clase {n}<small>{html.escape(corto)}</small></div>')
+            else:
+                chips.append(f'<div class="ruta-chip prox">Clase {n}<small>{html.escape(corto)}</small></div>')
+        return '<div class="ruta-clases"><div class="ruta-titulo">🧭 Ruta del curso</div><div class="ruta-fila">' + "".join(chips) + "</div></div>"
+    except Exception:
+        return ""
+
 
 # --- PRESENTACIÓN DE RESPUESTAS: separar texto normal de bloques especiales ---
 # (Mermaid / material de apoyo / mini controles interactivos)
@@ -967,7 +1325,12 @@ def render_mermaid(codigo_mermaid, height=480):
       }});
     </script>
     """
-    components.html(html, height=height, scrolling=True)
+    # Streamlit retiró st.components.v1.html (aviso: "se eliminará después del 2026-06-01") a favor de
+    # st.iframe; se usa el nuevo si existe y, si la versión instalada es antigua, el anterior.
+    if hasattr(st, "iframe"):
+        st.iframe(html, height=height)
+    else:
+        components.html(html, height=height, scrolling=True)
 
 
 def _icono_material(entrada):
@@ -1028,6 +1391,8 @@ def render_material(material_id, materiales_disponibles, es_nuevo=False):
         return
 
     abrir_material_flotante(material_id, forzar=es_nuevo)
+    if es_nuevo:
+        gam_evento("material", id=material_id, tipo=entrada.get("tipo"))
 
     titulo = html.escape(entrada.get("titulo") or material_id)
     descripcion = entrada.get("descripcion")
@@ -1185,6 +1550,7 @@ def render_quiz(contenido_json, idx_bloque):
 
     if preguntas and respondidas == len(preguntas):
         st.info(f"🏁 **Resultado: {aciertos} de {len(preguntas)} correctas.**")
+        gam_evento("prueba", clave=key_base, aciertos=aciertos, total=len(preguntas), tipo="quiz")
 
 
 def render_pareados(contenido_json, idx_bloque):
@@ -1263,6 +1629,7 @@ def render_pareados(contenido_json, idx_bloque):
             else:
                 st.error(f"❌ **{t['termino']}** → elegiste: {elegidas[i]}\n\n   Correcta: {t['definicion']}")
         st.info(f"🏁 **Resultado: {aciertos} de {len(terminos)} correctas.**")
+        gam_evento("prueba", clave=key_base, aciertos=aciertos, total=len(terminos), tipo="pareados")
 
 
 def _formatear_control_como_bloques(datos, tema=None):
@@ -1611,6 +1978,8 @@ def mostrar_respuesta_tutor(texto, key_sufijo, permitir_descarga=True, asignatur
     """
     for idx_bloque, (tipo, contenido) in enumerate(extraer_bloques(texto)):
         if tipo == "mermaid":
+            if es_respuesta_nueva:
+                gam_evento("mapa")
             try:
                 render_mermaid(contenido)
             except Exception:
@@ -1683,70 +2052,76 @@ if "materiales_flotantes" not in st.session_state:
 if "materiales_cerrados" not in st.session_state:
     st.session_state.materiales_cerrados = set()
 
+# --- CLAVE DE GEMINI: integrada (Secrets de Streamlit / variable de entorno), sin cuadro en pantalla ---
+def _obtener_api_key():
+    clave = os.environ.get("GEMINI_API_KEY", "")
+    if not clave:
+        try:
+            clave = st.secrets.get("GEMINI_API_KEY", "")
+        except Exception:
+            clave = ""
+    return clave
+
+api_key = _obtener_api_key()
+
 # --- BARRA LATERAL (SIDEBAR INSTITUCIONAL) ---
 with st.sidebar:
-    st.markdown('<div class="sidebar-card-title">⚙️ Configuración</div>', unsafe_allow_html=True)
-    api_key = st.text_input("Gemini API Key:", type="password", help="Obtenla en aistudio.google.com")
-    st.markdown("<br>", unsafe_allow_html=True)
+    if ruta_cognimorph:
+        st.markdown(
+            f'<div class="logo-card"><img src="data:image/png;base64,{get_base64_image(ruta_cognimorph)}"></div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown('<div class="logo-card"><h2 style="color:#EA580C;margin:0">🧠 CogniMorph</h2></div>', unsafe_allow_html=True)
 
-    st.markdown('<div class="sidebar-card-title">📚 Asignatura DMYF</div>', unsafe_allow_html=True)
-    asignatura_sel = st.selectbox(
-        "Selecciona el curso:",
-        [
-            "MYF205 - Anatomía de Cabeza y Cuello",
-            "MYF2069 - Fisiología General"
-        ]
-    )
+    with st.container(key="card_asignatura"):
+        st.markdown('<div class="sidebar-card-title">📚 Mi asignatura</div>', unsafe_allow_html=True)
+        asignatura_sel = st.selectbox(
+            "Selecciona el curso:",
+            [
+                "MYF205 - Anatomía de Cabeza y Cuello",
+                "MYF2069 - Fisiología General"
+            ],
+            label_visibility="collapsed",
+        )
     cod_materia = "MYF205" if "MYF205" in asignatura_sel else "MYF2069"
     materiales_disponibles, aviso_materiales = cargar_materiales(cod_materia)
-    materiales_listos = [m for m in materiales_disponibles if m.get("existe")]
-    if materiales_disponibles:
-        st.caption(f"🎧 Materiales de apoyo listos: {len(materiales_listos)} de {len(materiales_disponibles)} en el índice")
-    if aviso_materiales:
-        st.warning(f"⚠️ Materiales de apoyo: {aviso_materiales}")
 
-    # Panel de depuración: muestra EXACTAMENTE lo que la app leyó de materiales.json para esta
-    # asignatura (id, tema, si el archivo se encontró). Existe porque "el tutor no lo reconoce"
-    # puede deberse a varias causas distintas (json no actualizado, tema vacío, archivo no
-    # encontrado, asignatura equivocada) y sin esto había que adivinar cuál — ahora se ve directo.
-    with st.expander(f"🔍 Ver materiales cargados para {cod_materia} (debug)"):
-        if not materiales_disponibles:
-            st.caption(
-                "No hay ninguna entrada cargada desde materiales.json para esta asignatura. "
-                "Si ya corriste el script generador, confirma que guardó el archivo en "
-                f"data/{cod_materia}/materiales.json (no en otra carpeta) y que tiene contenido."
-            )
-        else:
-            for m in materiales_disponibles:
-                estado = "✅ archivo encontrado" if m.get("existe") else "❌ ARCHIVO NO ENCONTRADO"
-                tema_mostrado = m.get("tema") or "⚠️ (vacío — el tutor no podrá asociarlo a ningún tema)"
-                st.markdown(
-                    f"- **id:** `{m.get('id', '(sin id)')}` — **tema:** {tema_mostrado}\n"
-                    f"  **archivo:** `{m.get('archivo', '(sin archivo)')}` — {estado}"
-                )
-    st.markdown("<br>", unsafe_allow_html=True)
+    # Panel de nivel, XP e insignias: se rellena AL FINAL del script (así muestra lo que se ganó en este mismo turno).
+    panel_gamificacion = st.empty()
+
+    # Avisos técnicos sobre el índice de materiales: solo para el profesor (agregando ?admin=1 a la URL).
+    try:
+        _es_admin = str(st.query_params.get("admin", "")).lower() in ("1", "true", "si", "sí")
+    except Exception:
+        _es_admin = False
+    if _es_admin:
+        _listos = [m for m in materiales_disponibles if m.get("existe")]
+        if materiales_disponibles:
+            st.caption(f"🎧 Materiales de apoyo listos: {len(_listos)} de {len(materiales_disponibles)} en el índice")
+        if aviso_materiales:
+            st.warning(f"⚠️ Materiales de apoyo: {aviso_materiales}")
 
     # SIMULADOR DE ESTUDIANTE EN BLACKBOARD
-    st.markdown('<div class="sidebar-card-title">👤 Estudiante (Blackboard SSO)</div>', unsafe_allow_html=True)
-    alumnos_lista = cargar_estudiantes(cod_materia)
-    opciones_alumnos = {f"{a['nombre']} ({a['carrera']} - Riesgo {a['riesgo']})": a for a in alumnos_lista}
-    opcion_elegida = st.selectbox("Simular ingreso de estudiante:", list(opciones_alumnos.keys()))
-    alumno_activo = opciones_alumnos[opcion_elegida]
-    st.caption(f"🆔 ID: {alumno_activo['id']} | Promedio previo: **{alumno_activo['promedio_previo']}**")
-    st.markdown("<br>", unsafe_allow_html=True)
+    with st.container(key="card_estudiante"):
+        st.markdown('<div class="sidebar-card-title">👤 Estudiante (Blackboard SSO)</div>', unsafe_allow_html=True)
+        alumnos_lista = cargar_estudiantes(cod_materia)
+        opciones_alumnos = {f"{a['nombre']} ({a['carrera']} - Riesgo {a['riesgo']})": a for a in alumnos_lista}
+        opcion_elegida = st.selectbox("Simular ingreso de estudiante:", list(opciones_alumnos.keys()))
+        alumno_activo = opciones_alumnos[opcion_elegida]
+        st.caption(f"🆔 ID: {alumno_activo['id']} | Promedio previo: **{alumno_activo['promedio_previo']}**")
+    st.session_state.alumno_id_activo = alumno_activo["id"]
+    dibujar_panel_gamificacion(panel_gamificacion)  # dibujo inicial; se vuelve a dibujar al final del script
 
-    st.markdown('<div class="sidebar-card-title">📄 Subir Guía Extra</div>', unsafe_allow_html=True)
-    pdf = st.file_uploader("Cargar documento adicional:", type=["pdf"])
-    if pdf:
-        reader = PdfReader(pdf)
-        st.session_state.contexto_pdf_manual = "".join([page.extract_text() or "" for page in reader.pages])
-        st.success("✅ Guía extra cargada")
-    st.markdown("<br>", unsafe_allow_html=True)
+    with st.container(key="card_guia"):
+        st.markdown('<div class="sidebar-card-title">📄 Subir guía extra</div>', unsafe_allow_html=True)
+        pdf = st.file_uploader("Cargar documento adicional:", type=["pdf"], label_visibility="collapsed")
+        if pdf:
+            reader = PdfReader(pdf)
+            st.session_state.contexto_pdf_manual = "".join([page.extract_text() or "" for page in reader.pages])
+            st.success("✅ Guía extra cargada")
 
-    st.markdown('<div class="sidebar-card-title">📊 Registro de Estudio</div>', unsafe_allow_html=True)
-    col_met1, col_met2 = st.columns(2)
-    col_met1.metric("Consultas", st.session_state.tracker.data.get("sesiones_chat", 0))
-    col_met2.metric("Quizzes", st.session_state.tracker.data.get("quizzes_intentos", 0))
+    st.markdown(f'<div class="logo-udla-card">{udla_img_html}</div>', unsafe_allow_html=True)
 
 # --- REPRODUCTOR FLOTANTE DE MATERIALES (audio/video que el estudiante pidió escuchar/ver) ---
 # Va ACÁ, ANTES de procesar una consulta nueva (no al final del script): así, mientras el tutor
@@ -1758,23 +2133,11 @@ with st.sidebar:
 # se detecta uno nuevo — ver el bloque "if texto_a_enviar".
 mostrar_reproductor_flotante(materiales_disponibles)
 
-# --- ENCABEZADO PRINCIPAL (HEADER UDLA) ---
-st.markdown(f"""
-<div class="udla-header">
-    <h1>Universidad de Las Américas</h1>
-    <div class="udla-logo-box">
-        {udla_img_html}
-    </div>
-</div>
-""", unsafe_allow_html=True)
-
-# Logo Central CogniMorph
-col_izq, col_centro, col_der = st.columns([1, 2.5, 1])
-with col_centro:
-    if ruta_cognimorph:
-        st.image(ruta_cognimorph, width=350)
-    else:
-        st.markdown("<h1 style='text-align:center; color:#EA580C;'>🧠 CogniMorph</h1>", unsafe_allow_html=True)
+# --- ENCABEZADO PRINCIPAL: ruta del curso (el logo de CogniMorph y el de UDLA van en la barra lateral) ---
+mostrar_toasts_pendientes()
+_ruta_html = ruta_clases_html(cod_materia)
+if _ruta_html:
+    st.markdown(_ruta_html, unsafe_allow_html=True)
 
 # Barra de Asignatura Activa
 st.markdown(f"""
@@ -1945,7 +2308,7 @@ if control_pendiente is None and texto_a_enviar and _PATRON_PREGUNTA_CONTENIDO_E
                 es_respuesta_nueva=True,
             )
         st.session_state.mensajes.append({"role": "assistant", "content": respuesta_lookup})
-        st.session_state.tracker.registrar_consulta()
+        registrar_consulta_gam()
         texto_a_enviar = None
 
 # Si el estudiante escribió el pedido de control directo en el chat (en vez de usar el banner o los
@@ -2014,7 +2377,7 @@ if control_pendiente is not None:
                 es_respuesta_nueva=True,
             )
             st.session_state.mensajes.append({"role": "assistant", "content": respuesta})
-            st.session_state.tracker.registrar_consulta()
+            registrar_consulta_gam()
             if not error_control:
                 st.session_state.tracker.registrar_quiz(nota="Completado")
 
@@ -2055,7 +2418,7 @@ elif texto_a_enviar:
                 es_respuesta_nueva=True,
             )
             st.session_state.mensajes.append({"role": "assistant", "content": respuesta})
-            st.session_state.tracker.registrar_consulta()
+            registrar_consulta_gam()
             if "quiz" in texto_a_enviar.lower():
                 st.session_state.tracker.registrar_quiz(nota="Completado")
 
@@ -2068,6 +2431,10 @@ elif texto_a_enviar:
     # esperar a que el estudiante mande otro mensaje.
     if set(st.session_state.materiales_flotantes) - materiales_flotantes_antes:
         st.rerun()
+
+# --- PANEL DE NIVEL/INSIGNIAS (al final, para reflejar lo ganado en este mismo turno) ---
+dibujar_panel_gamificacion(panel_gamificacion)
+mostrar_toasts_pendientes()
 
 # --- PIE DE PÁGINA INSTITUCIONAL ---
 st.markdown("""
