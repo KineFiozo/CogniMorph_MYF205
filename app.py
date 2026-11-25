@@ -15,7 +15,7 @@ import html
 import random
 import requests
 from io import BytesIO
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from PIL import Image as PILImage
 from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.styles import getSampleStyleSheet
@@ -296,34 +296,29 @@ st.markdown(f"""
         color: #991B1B;
     }}
 
-    /* Banner llamativo invitando al "control completo" (8 SM + 8 pareados) — ver quick actions */
+    /* Tarjeta que invita a la prueba (estilo claro, a tono con el resto de la página) */
     .cognimorph-banner-control {{
-        background: linear-gradient(135deg, #7C2D12 0%, #EA580C 55%, #F97316 100%);
-        border-radius: 14px;
-        padding: 16px 22px;
-        margin-bottom: 18px;
-        color: #FFFFFF;
-        box-shadow: 0 6px 18px rgba(234,88,12,0.30);
+        background: #EEF2FF;
+        border: 2px solid #C7D2FE;
+        border-radius: 18px;
+        padding: 14px 20px;
+        margin-bottom: 14px;
+        color: #312E81;
+        box-shadow: 0 5px 0 #C7D2FE;
     }}
     .cognimorph-banner-control .titulo-banner {{
-        font-size: 1.05rem;
+        font-size: 1.02rem;
         font-weight: 800;
         margin-bottom: 4px;
+        color: #3730A3;
     }}
     .cognimorph-banner-control .texto-banner {{
         font-size: 0.9rem;
-        color: #FFEDD5;
+        color: #475569;
     }}
-    .st-key-cognimorph_btn_control_completo .stButton>button {{
-        background-color: #FFFFFF !important;
-        color: #C2410C !important;
-        border: none !important;
-        font-weight: 800 !important;
-        font-size: 0.95rem !important;
-    }}
-    .st-key-cognimorph_btn_control_completo .stButton>button:hover {{
-        background-color: #FFEDD5 !important;
-        box-shadow: none !important;
+    .st-key-cognimorph_selector_alcance {{
+        background: #FFFFFF; border: 2px solid #C7D2FE; border-radius: 18px; padding: 14px 18px 8px; margin: 6px 0 14px;
+        box-shadow: 0 5px 0 #E0E7FF;
     }}
 
     /* Términos pareados (render_pareados): por defecto el selectbox de Streamlit corta con "..."
@@ -562,15 +557,17 @@ st.markdown("""
         box-shadow: 0 6px 0 #E0E7FF; margin-bottom: 14px; }
     section[data-testid="stSidebar"] [data-testid="stExpander"] summary { font-weight: 800; color: #4338CA; }
 
-    /* Ruta del curso */
+    /* Ruta del curso: todas las clases por unidad */
     .ruta-clases { margin-bottom: 14px; }
-    .ruta-titulo { font-weight: 800; color: #4338CA; font-size: 0.9rem; margin-bottom: 6px; }
-    .ruta-fila { display: flex; gap: 10px; flex-wrap: wrap; }
-    .ruta-chip { flex: 1; min-width: 120px; border-radius: 18px; padding: 9px 10px; text-align: center; font-weight: 800; font-size: 0.86rem; }
-    .ruta-chip small { display: block; font-weight: 600; font-size: 0.7rem; opacity: .85; margin-top: 2px; }
-    .ruta-chip.ok { background: #DCFCE7; color: #166534; box-shadow: 0 5px 0 #BBF7D0; }
-    .ruta-chip.ahora { background: linear-gradient(135deg, #F97316, #FB923C); color: #fff; box-shadow: 0 5px 0 #C2410C; }
-    .ruta-chip.prox { background: #FFFFFF; color: #64748B; box-shadow: 0 5px 0 #E0E7FF; }
+    .ruta-titulo { font-weight: 800; color: #4338CA; font-size: 0.92rem; margin-bottom: 8px; }
+    .ruta-titulo span { font-weight: 600; font-size: 0.72rem; color: #64748B; margin-left: 6px; }
+    .ruta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); gap: 10px; }
+    .ruta-unidad { background: #FFFFFF; border-radius: 16px; padding: 8px 10px 10px; box-shadow: 0 5px 0 #E0E7FF; }
+    .ruta-unidad.actual { border: 2px solid #F97316; box-shadow: 0 5px 0 #FDBA74; }
+    .ruta-u-titulo { font-weight: 800; color: #3730A3; font-size: 0.82rem; margin-bottom: 5px; }
+    .ruta-clase { font-size: 0.74rem; line-height: 1.25; border-radius: 9px; padding: 4px 7px; margin-bottom: 4px; color: #475569; background: #F8FAFC; }
+    .ruta-clase.ok { background: #DCFCE7; color: #166534; }
+    .ruta-clase.ahora { background: linear-gradient(135deg, #F97316, #FB923C); color: #fff; font-weight: 700; }
 
     /* Asignatura activa */
     .active-subject-badge { background: #FFFFFF !important; border: 2px solid #C7D2FE !important; color: #3730A3 !important;
@@ -836,17 +833,17 @@ INSIGNIAS = [
     {"id": "curiosidad", "icono": "💬", "nombre": "Curiosidad activa",
      "como": "Llega a 10 consultas."},
     {"id": "oido", "icono": "🎧", "nombre": "Oído atento",
-     "como": "Escucha un podcast o una canción de apoyo."},
+     "como": "Escucha 3 podcasts o canciones de apoyo distintos."},
     {"id": "cine", "icono": "🎬", "nombre": "Cine anatómico",
-     "como": "Mira un video de apoyo."},
+     "como": "Mira 3 videos de apoyo distintos."},
     {"id": "mapa", "icono": "🗺️", "nombre": "Mapa maestro",
-     "como": "Pídele a CogniMorph un mapa conceptual."},
+     "como": "Pídele 3 mapas conceptuales a CogniMorph."},
     {"id": "valiente", "icono": "📝", "nombre": "Valiente",
-     "como": "Completa tu primera prueba (selección múltiple o términos pareados)."},
+     "como": "Envía 3 pruebas (selección múltiple + términos pareados)."},
     {"id": "mente_brillante", "icono": "⭐", "nombre": "Mente brillante",
-     "como": "Logra 80 % o más en una prueba de 10 ítems o más."},
+     "como": "Logra 80 % o más en una prueba enviada de 10 ítems o más."},
     {"id": "desafio_unidad", "icono": "🏆", "nombre": "Desafío de unidad",
-     "como": "Completa una prueba de unidad completa (24 preguntas de selección múltiple)."},
+     "como": "Envía una prueba de unidad completa (24 preguntas de selección múltiple + 10 términos pareados)."},
     {"id": "constancia", "icono": "🔥", "nombre": "Constancia",
      "como": "Estudia con CogniMorph en 3 días distintos."},
 ]
@@ -887,20 +884,29 @@ def _insignia_cumplida(ins_id, g):
     if ins_id == "curiosidad":
         return g["consultas"] >= 10
     if ins_id == "oido":
-        return len(g["audios"]) >= 1
+        return len(g["audios"]) >= 3
     if ins_id == "cine":
-        return len(g["videos"]) >= 1
+        return len(g["videos"]) >= 3
     if ins_id == "mapa":
-        return g["mapas"] >= 1
+        return g["mapas"] >= 3
     if ins_id == "valiente":
-        return len(pruebas) >= 1
+        return len(pruebas) >= 3
     if ins_id == "mente_brillante":
         return any(p["total"] >= 10 and p["aciertos"] / max(p["total"], 1) >= 0.8 for p in pruebas)
     if ins_id == "desafio_unidad":
-        return any(p.get("tipo") == "quiz" and p["total"] >= 24 for p in pruebas)
+        return any(p.get("n_sm", 0) >= 24 for p in pruebas)
     if ins_id == "constancia":
         return len(g["dias"]) >= 3
     return False
+
+
+def _progreso_insignia(ins_id, g):
+    """(avance, meta) de las insignias que se ganan acumulando peticiones; None en las que no."""
+    metas = {"primer_paso": (min(g["consultas"], 1), 1), "curiosidad": (min(g["consultas"], 10), 10),
+             "oido": (min(len(g["audios"]), 3), 3), "cine": (min(len(g["videos"]), 3), 3),
+             "mapa": (min(g["mapas"], 3), 3), "valiente": (min(len(g["pruebas"]), 3), 3),
+             "constancia": (min(len(g["dias"]), 3), 3)}
+    return metas.get(ins_id)
 
 
 def _nivel_de(xp):
@@ -930,7 +936,8 @@ def gam_evento(evento, **kw):
             clave = kw["clave"]
             if clave in g["pruebas"]:
                 return
-            g["pruebas"][clave] = {"aciertos": int(kw["aciertos"]), "total": int(kw["total"]), "tipo": kw.get("tipo")}
+            g["pruebas"][clave] = {"aciertos": int(kw["aciertos"]), "total": int(kw["total"]),
+                                   "n_sm": int(kw.get("n_sm", 0)), "fecha": _hoy_chile_iso()}
             g["xp"] += XP_PRUEBA_BASE + XP_POR_ACIERTO * int(kw["aciertos"])
         else:
             return
@@ -999,9 +1006,11 @@ def dibujar_panel_gamificacion(contenedor):
         )
         if pendientes:
             prox = pendientes[0]
+            prog = _progreso_insignia(prox["id"], g)
+            prog_txt = f' <b>({prog[0]} de {prog[1]})</b>' if prog else ""
             st.markdown(
                 f'<div class="gam-card gam-reto"><div class="gam-titulo">🎯 Tu próximo desafío</div>'
-                f'<b>{prox["icono"]} {html.escape(prox["nombre"])}</b><br>{html.escape(prox["como"])}</div>',
+                f'<b>{prox["icono"]} {html.escape(prox["nombre"])}</b><br>{html.escape(prox["como"])}{prog_txt}</div>',
                 unsafe_allow_html=True,
             )
         else:
@@ -1013,55 +1022,67 @@ def dibujar_panel_gamificacion(contenedor):
         with st.expander("🎯 Cómo ganar tus insignias", expanded=False):
             for ins in INSIGNIAS:
                 ok = ins["id"] in g["insignias"]
-                st.markdown(f"{'✅' if ok else '🔒'} **{ins['icono']} {ins['nombre']}** — {ins['como']}")
+                prog = _progreso_insignia(ins["id"], g)
+                prog_txt = f" _(llevas {prog[0]} de {prog[1]})_" if (prog and not ok) else ""
+                st.markdown(f"{'✅' if ok else '🔒'} **{ins['icono']} {ins['nombre']}** — {ins['como']}{prog_txt}")
             st.markdown(
                 "---\n**⚡ ¿Cómo sumo XP?**\n\n"
                 f"- Cada consulta: **+{XP_CONSULTA} XP**\n"
                 f"- Abrir un material de apoyo nuevo (podcast, canción o video): **+{XP_MATERIAL} XP**\n"
                 f"- Recibir un mapa conceptual: **+{XP_MAPA} XP**\n"
-                f"- Completar una prueba: **+{XP_PRUEBA_BASE} XP** y **+{XP_POR_ACIERTO} XP** por cada acierto\n"
+                f"- Enviar una prueba: **+{XP_PRUEBA_BASE} XP** y **+{XP_POR_ACIERTO} XP** por cada acierto\n"
                 f"- Cada insignia nueva: **+{XP_INSIGNIA} XP**\n\n"
                 f"Cada {XP_POR_NIVEL} XP subes de nivel."
             )
 
 
 def ruta_clases_html(cod_materia):
-    """Franja "Ruta del curso": clases alrededor de la semana actual según el cronograma (solo MYF205 por ahora)."""
+    """
+    "Ruta del curso": TODAS las clases agrupadas por unidad, para que el estudiante tenga siempre a la vista
+    el mapa de contenidos. Si el cronograma trae fechas (MYF205), marca cada clase según el calendario:
+    ✔ ya pasó, ▶ es esta semana, sin marca = viene más adelante. Es el calendario del curso, no el avance
+    individual del estudiante.
+    """
     try:
         cron = cargar_cronograma(cod_materia)
-        dias = cron.get("dias") if isinstance(cron, dict) else None
-        if not dias:
+        unidades = estructura_unidades(cron)
+        if not unidades:
             return ""
-        hoy = _hoy_chile_iso()
-        clases = {}
-        for d in dias:
-            texto = ((d.get("catedra") or {}).get("contenido")) or ""
-            m = re.search(r"C(\d+)\s*:\s*(.+)", texto)
+        fechas = {}
+        for d in (cron.get("dias") or []) if isinstance(cron, dict) else []:
+            cont = ((d.get("catedra") or {}).get("contenido")) or ""
+            m = re.search(r"C\s*(\d+)\s*[:.]", cont)
             f = re.match(r"(\d{2})-(\d{2})-(\d{4})", d.get("fecha") or "")
             if m and f:
-                clases[int(m.group(1))] = (f"{f.group(3)}-{f.group(2)}-{f.group(1)}", m.group(2).strip())
-        if not clases:
-            return ""
-        orden = sorted(clases)
-        pasadas = [n for n in orden if clases[n][0] <= hoy]
-        actual = max(pasadas) if pasadas else orden[0]
-        pos = orden.index(actual)
-        ini = max(0, min(pos - 2, len(orden) - 5))
-        ventana = orden[ini:ini + 5]
-        chips = []
-        for n in ventana:
-            titulo = clases[n][1]
-            corto = (titulo[:24] + "…") if len(titulo) > 25 else titulo
-            if n < actual:
-                chips.append(f'<div class="ruta-chip ok">✔ Clase {n}<small>{html.escape(corto)}</small></div>')
-            elif n == actual:
-                chips.append(f'<div class="ruta-chip ahora">▶ Clase {n}<small>{html.escape(corto)}</small></div>')
-            else:
-                chips.append(f'<div class="ruta-chip prox">Clase {n}<small>{html.escape(corto)}</small></div>')
-        return '<div class="ruta-clases"><div class="ruta-titulo">🧭 Ruta del curso</div><div class="ruta-fila">' + "".join(chips) + "</div></div>"
+                fechas[int(m.group(1))] = date(int(f.group(3)), int(f.group(2)), int(f.group(1)))
+        hoy = date.fromisoformat(_hoy_chile_iso())
+        tarjetas = []
+        for u in unidades:
+            filas, es_actual = [], False
+            for c in u["clases"]:
+                f = fechas.get(c["n"])
+                estado, marca = "prox", ""
+                if f is not None:
+                    if hoy >= f + timedelta(days=7):
+                        estado, marca = "ok", "✔ "
+                    elif hoy >= f:
+                        estado, marca, es_actual = "ahora", "▶ ", True
+                nombre = c["nombre"]
+                corto = (nombre[:38] + "…") if len(nombre) > 39 else nombre
+                filas.append(
+                    f'<div class="ruta-clase {estado}"><b>{marca}C{c["n"]}</b> {html.escape(corto)}</div>'
+                )
+            tarjetas.append(
+                f'<div class="ruta-unidad{" actual" if es_actual else ""}">'
+                f'<div class="ruta-u-titulo">{html.escape(u["etiqueta"])}</div>{"".join(filas)}</div>'
+            )
+        return (
+            '<div class="ruta-clases"><div class="ruta-titulo">🧭 Ruta del curso '
+            '<span>según el calendario · ✔ ya vista · ▶ esta semana</span></div>'
+            f'<div class="ruta-grid">{"".join(tarjetas)}</div></div>'
+        )
     except Exception:
         return ""
-
 
 # --- PRESENTACIÓN DE RESPUESTAS: separar texto normal de bloques especiales ---
 # (Mermaid / material de apoyo / mini controles interactivos)
@@ -1486,23 +1507,17 @@ def mostrar_reproductor_flotante(materiales_disponibles):
             st.markdown("---")
 
 
-def render_quiz(contenido_json, idx_bloque):
+def render_quiz(contenido_json, idx_bloque, revelar=False):
     """
-    Dibuja un mini control de selección múltiple a partir de un bloque ```quiz``` (ver punto 7 del
-    prompt en tutor_core.py): una o más preguntas, cada una con sus alternativas. Apenas el
-    estudiante elige una alternativa (st.radio con index=None, sin nada preseleccionado), se
-    muestra al tiro si acertó o no, con una frase que orienta en caso de error — no hace falta
-    ningún botón de "enviar" por pregunta.
-    Si el bloque no es JSON válido o le faltan campos, avisa en vez de romper la respuesta completa.
+    Dibuja las preguntas de selección múltiple de un bloque ```quiz``` (ver punto 7 del prompt en
+    tutor_core.py). SIN retroalimentación mientras el estudiante responde: la corrección aparece
+    recién cuando envía la prueba completa (revelar=True; ahí las alternativas quedan bloqueadas — un
+    solo intento). Devuelve {"aciertos", "total", "respondidas", "tipo"} para que
+    mostrar_respuesta_tutor arme el puntaje total, o None si el bloque no se pudo leer.
 
-    OJO CON LAS KEYS: key_sufijo NO se usa para las keys de los widgets (aunque se recibe como
-    parámetro) porque cambia de nombre para el MISMO mensaje según el momento en que se dibuja —
-    "nueva_N" la primera vez que responde el tutor, "hist_N" de ahí en adelante (mismo N, prefijo
-    distinto). Streamlit trata una key distinta como un widget NUEVO y le borra la selección hecha
-    bajo la key anterior — eso hacía que las alternativas parecieran "no clickeables": el estudiante
-    elegía una, el clic disparaba un rerun, y ese rerun ya dibujaba el radio con la otra key (sin
-    nada elegido). Por eso la key se arma desde un hash del contenido del bloque, que es idéntico
-    sin importar si se está dibujando como respuesta recién generada o como parte del historial.
+    OJO CON LAS KEYS: las keys de los widgets se arman desde un hash del contenido del bloque (no
+    desde key_sufijo), porque key_sufijo cambia de "nueva_N" a "hist_N" para el MISMO mensaje entre
+    el momento en que se genera y los reruns siguientes, y una key distinta borra la selección.
     """
     try:
         datos = json.loads(contenido_json)
@@ -1511,10 +1526,11 @@ def render_quiz(contenido_json, idx_bloque):
             raise ValueError("El bloque quiz no trae ninguna pregunta.")
     except Exception as e:
         st.warning(f"⚠️ Este mini control no se pudo mostrar (formato inválido: {e}).")
-        return
+        return None
 
     hash_contenido = hashlib.sha1(contenido_json.encode("utf-8")).hexdigest()[:12]
     key_base = f"quiz_{hash_contenido}_{idx_bloque}"
+    total = 0
     respondidas = 0
     aciertos = 0
 
@@ -1529,45 +1545,43 @@ def render_quiz(contenido_json, idx_bloque):
             st.warning(f"⚠️ La pregunta {i + 1} de este control no se pudo mostrar ({e}).")
             continue
 
+        total += 1
         st.markdown(f"**{i + 1}. {texto_pregunta}**")
-        key_pregunta = f"{key_base}_p{i}"
         idx_elegida = st.radio(
             "Elige una alternativa:",
             options=list(range(len(alternativas))),
             format_func=lambda j, alts=alternativas: alts[j],
             index=None,
-            key=key_pregunta,
+            key=f"{key_base}_p{i}",
             label_visibility="collapsed",
+            disabled=revelar,
         )
         if idx_elegida is not None:
             respondidas += 1
             if idx_elegida == idx_correcta:
                 aciertos += 1
+        if revelar and idx_elegida is not None:
+            if idx_elegida == idx_correcta:
                 st.success(f"✅ ¡Correcto! {pregunta.get('retroalimentacion_correcta', '')}".strip())
             else:
-                st.error(f"❌ No es esa. {pregunta.get('retroalimentacion_incorrecta', '')}".strip())
+                correcta_txt = alternativas[idx_correcta]
+                st.error(
+                    f"❌ No es esa. La respuesta correcta es: **{correcta_txt}**. "
+                    f"{pregunta.get('retroalimentacion_incorrecta', '')}".strip()
+                )
         st.markdown("")
 
-    if preguntas and respondidas == len(preguntas):
-        st.info(f"🏁 **Resultado: {aciertos} de {len(preguntas)} correctas.**")
-        gam_evento("prueba", clave=key_base, aciertos=aciertos, total=len(preguntas), tipo="quiz")
+    return {"aciertos": aciertos, "total": total, "respondidas": respondidas, "tipo": "quiz"}
 
 
-def render_pareados(contenido_json, idx_bloque):
+def render_pareados(contenido_json, idx_bloque, revelar=False):
     """
-    Dibuja un mini control de términos pareados a partir de un bloque ```pareados``` (ver punto 7
-    del prompt en tutor_core.py): una lista de {termino, definicion}. Cada término tiene un menú
-    desplegable con TODAS las definiciones (mezcladas una sola vez y guardadas en session_state
-    para que el orden no cambie en cada rerun) — el botón para revisar recién aparece cuando los
-    ocho (o los que sean) ya tienen una definición elegida, y ahí se muestran todos los resultados
-    juntos, como pidió el profesor.
-    Si el bloque no es JSON válido o le faltan campos, avisa en vez de romper la respuesta completa.
-
-    OJO CON LAS KEYS: igual que en render_quiz, key_sufijo NO se usa para las keys de los widgets
-    (cambia de "nueva_N" a "hist_N" para el mismo mensaje entre el momento en que se genera y
-    cualquier rerun posterior, y una key distinta borra la selección hecha bajo la anterior). La key
-    se arma desde un hash del contenido del bloque, estable sin importar desde qué parte del script
-    se esté dibujando.
+    Dibuja los términos pareados de un bloque ```pareados``` (ver punto 7 del prompt en tutor_core.py):
+    cada término tiene un menú con TODAS las definiciones (mezcladas una sola vez y guardadas en
+    session_state para que el orden no cambie entre reruns). Igual que en render_quiz, no hay
+    retroalimentación hasta que el estudiante envía la prueba completa (revelar=True; los menús quedan
+    bloqueados). Devuelve {"aciertos", "total", "respondidas", "tipo"} o None si el bloque no se pudo leer.
+    Las keys se arman desde un hash del contenido (ver la nota de render_quiz).
     """
     try:
         datos = json.loads(contenido_json)
@@ -1579,7 +1593,7 @@ def render_pareados(contenido_json, idx_bloque):
                 raise ValueError("hay un término sin 'termino' o sin 'definicion'.")
     except Exception as e:
         st.warning(f"⚠️ Este mini control no se pudo mostrar (formato inválido: {e}).")
-        return
+        return None
 
     hash_contenido = hashlib.sha1(contenido_json.encode("utf-8")).hexdigest()[:12]
     key_base = f"pareados_{hash_contenido}_{idx_bloque}"
@@ -1594,42 +1608,72 @@ def render_pareados(contenido_json, idx_bloque):
         st.markdown(f"*{datos['instrucciones']}*")
 
     PLACEHOLDER = "— Selecciona una definición —"
-    elegidas = {}
+    aciertos = 0
+    respondidas = 0
     for i, t in enumerate(terminos):
-        # El término y su selectbox van UNO ENCIMA DEL OTRO (no en columnas lado a lado): así el
-        # menú desplegable aprovecha todo el ancho disponible en vez de la mitad, que es lo que
-        # cortaba las definiciones más largas con "..." antes de que se alcanzaran a leer completas
-        # (ver también el CSS de white-space/word-break junto a "Términos pareados" más arriba).
+        # El término y su selectbox van UNO ENCIMA DEL OTRO: así el menú aprovecha todo el ancho y no
+        # corta con "..." las definiciones largas (ver también el CSS de white-space/word-break).
         st.markdown(f"**{t['termino']}**")
-        elegidas[i] = st.selectbox(
+        elegida = st.selectbox(
             f"Definición para {t['termino']}",
             options=[PLACEHOLDER] + definiciones_mezcladas,
             key=f"{key_base}_sel_{i}",
             label_visibility="collapsed",
+            disabled=revelar,
         )
+        if elegida != PLACEHOLDER:
+            respondidas += 1
+            if elegida == t["definicion"]:
+                aciertos += 1
+        if revelar and elegida != PLACEHOLDER:
+            if elegida == t["definicion"]:
+                st.success(f"✅ **{t['termino']}** → {elegida}")
+            else:
+                st.error(f"❌ **{t['termino']}** → elegiste: {elegida}\n\n   Correcta: {t['definicion']}")
         st.markdown("")
 
-    todas_respondidas = all(v != PLACEHOLDER for v in elegidas.values())
-    key_revisado = f"{key_base}_revisado"
+    return {"aciertos": aciertos, "total": len(terminos), "respondidas": respondidas, "tipo": "pareados"}
 
-    if not todas_respondidas:
-        st.caption(f"Completa los {len(terminos)} términos para poder revisar tus respuestas.")
+
+def _marcar_prueba_enviada(key_prueba):
+    st.session_state[f"{key_prueba}_enviada"] = True
+
+
+def _area_envio_prueba(key_prueba, resultados, enviada):
+    """
+    Cierre de una prueba (selección múltiple + términos pareados): mientras no se envía, muestra el avance
+    y el botón "Enviar prueba" (activo solo con TODO respondido); una vez enviada, muestra el puntaje
+    total y lo registra (insignias y XP). Un solo intento por prueba.
+    """
+    total = sum(r["total"] for r in resultados)
+    respondidas = sum(r["respondidas"] for r in resultados)
+    aciertos = sum(r["aciertos"] for r in resultados)
+    if total == 0:
         return
-
-    if st.button("✅ Revisar mis respuestas", key=f"{key_base}_btn_revisar"):
-        st.session_state[key_revisado] = True
-
-    if st.session_state.get(key_revisado):
-        aciertos = 0
-        for i, t in enumerate(terminos):
-            correcto = elegidas[i] == t["definicion"]
-            aciertos += correcto
-            if correcto:
-                st.success(f"✅ **{t['termino']}** → {elegidas[i]}")
-            else:
-                st.error(f"❌ **{t['termino']}** → elegiste: {elegidas[i]}\n\n   Correcta: {t['definicion']}")
-        st.info(f"🏁 **Resultado: {aciertos} de {len(terminos)} correctas.**")
-        gam_evento("prueba", clave=key_base, aciertos=aciertos, total=len(terminos), tipo="pareados")
+    if not enviada:
+        st.caption(f"Has respondido {respondidas} de {total}. Cuando termines, envía la prueba para ver tu retroalimentación.")
+        st.button(
+            "📨 Enviar prueba", key=f"{key_prueba}_btn_enviar", disabled=(respondidas < total),
+            on_click=_marcar_prueba_enviada, args=(key_prueba,),
+        )
+        return
+    pct = round(100 * aciertos / total)
+    partes = " · ".join(
+        f"{'Selección múltiple' if r['tipo'] == 'quiz' else 'Términos pareados'}: {r['aciertos']}/{r['total']}"
+        for r in resultados
+    )
+    if pct >= 80:
+        cierre = "🌟 ¡Excelente trabajo!"
+    elif pct >= 60:
+        cierre = "👍 Vas bien. Repasa lo que fallaste y vuelve a intentarlo con otra prueba."
+    else:
+        cierre = "💪 Todavía hay temas por reforzar. Pídele a CogniMorph que repasen juntos lo que fallaste."
+    st.info(f"🏁 **Puntaje final: {aciertos} de {total} ({pct} %)**  \n{partes}  \n{cierre}")
+    st.caption("Esta prueba ya fue enviada. Para intentarlo de nuevo, pide una prueba nueva.")
+    gam_evento(
+        "prueba", clave=key_prueba, aciertos=aciertos, total=total,
+        n_sm=sum(r["total"] for r in resultados if r["tipo"] == "quiz"),
+    )
 
 
 def _formatear_control_como_bloques(datos, tema=None):
@@ -1976,7 +2020,19 @@ def mostrar_respuesta_tutor(texto, key_sufijo, permitir_descarga=True, asignatur
     redibujar el historial) — es lo que permite reabrir un material que el estudiante había cerrado
     antes, si lo vuelve a pedir explícitamente.
     """
-    for idx_bloque, (tipo, contenido) in enumerate(extraer_bloques(texto)):
+    bloques = extraer_bloques(texto)
+    idx_tests = [i for i, (t, _c) in enumerate(bloques) if t in ("quiz", "pareados")]
+    ultimo_test = idx_tests[-1] if idx_tests else None
+    key_prueba = None
+    enviada = False
+    resultados_prueba = []
+    if idx_tests:
+        key_prueba = "prueba_" + hashlib.sha1(
+            "||".join(c for t, c in bloques if t in ("quiz", "pareados")).encode("utf-8")
+        ).hexdigest()[:12]
+        enviada = bool(st.session_state.get(f"{key_prueba}_enviada"))
+
+    for idx_bloque, (tipo, contenido) in enumerate(bloques):
         if tipo == "mermaid":
             if es_respuesta_nueva:
                 gam_evento("mapa")
@@ -1999,9 +2055,17 @@ def mostrar_respuesta_tutor(texto, key_sufijo, permitir_descarga=True, asignatur
         elif tipo == "material":
             render_material(contenido, materiales_disponibles, es_nuevo=es_respuesta_nueva)
         elif tipo == "quiz":
-            render_quiz(contenido, idx_bloque)
+            r = render_quiz(contenido, idx_bloque, revelar=enviada)
+            if r:
+                resultados_prueba.append(r)
+            if idx_bloque == ultimo_test:
+                _area_envio_prueba(key_prueba, resultados_prueba, enviada)
         elif tipo == "pareados":
-            render_pareados(contenido, idx_bloque)
+            r = render_pareados(contenido, idx_bloque, revelar=enviada)
+            if r:
+                resultados_prueba.append(r)
+            if idx_bloque == ultimo_test:
+                _area_envio_prueba(key_prueba, resultados_prueba, enviada)
         else:
             st.markdown(contenido)
 
@@ -2164,45 +2228,80 @@ prompt_sugerido = None
 control_pendiente = None
 pedido_prueba_banner = None  # texto del campo del banner si el estudiante pulsó "¡Quiero hacer una prueba!"
 
-# --- BANNER LLAMATIVO: INVITACIÓN A LA PRUEBA (clase: 10 + 10 / unidad: 24 + 10) ---
+# --- TARJETA QUE INVITA A LA PRUEBA (clase: 10 + 10 / unidad: 24 + 10) ---
 st.markdown(
     '<div class="cognimorph-banner-control">'
     '<div class="titulo-banner">🎯 ¿Te sientes list@ para ponerte a prueba?</div>'
-    '<div class="texto-banner">Cuando te sientas list@, cuéntame si quieres tu <b>prueba</b> de una '
-    "<b>clase</b> (10 preguntas de selección múltiple + 10 términos pareados) o de toda una "
-    "<b>unidad</b> (24 preguntas + 10 términos pareados), con el resultado al instante.</div></div>",
+    '<div class="texto-banner">Pulsa <b>¡Quiero hacer una prueba!</b> y elige una <b>clase</b> '
+    "(10 preguntas de selección múltiple + 10 términos pareados) o una <b>unidad</b> completa "
+    "(24 preguntas + 10 términos pareados). Verás tu retroalimentación y tu puntaje al enviar la prueba.</div></div>",
     unsafe_allow_html=True,
 )
-contenedor_boton_control = st.container(key="cognimorph_btn_control_completo")
-with contenedor_boton_control:
-    tema_control_input = st.text_input(
-        "¿De qué clase o tema quieres el control?",
-        key="cognimorph_tema_control_input",
-        placeholder="Ej: clase 6, o unidad 4… (si lo dejas en blanco, te pregunto)",
-        label_visibility="collapsed",
-    )
-    if st.button("🚀 ¡Quiero hacer una prueba!", key="cognimorph_btn_control_completo_click", use_container_width=True):
-        # El alcance (clase o unidad) y la cantidad de preguntas se resuelven más abajo, junto a los demás
-        # pedidos de prueba (ver _resolver_pedido_prueba).
-        pedido_prueba_banner = tema_control_input or ""
 
-# --- BOTONES DE ACCIÓN RÁPIDA (SUGERENCIAS Y CRONOGRAMA) ---
+# --- BOTONES DE ACCIÓN RÁPIDA ---
 st.markdown("💡 **Acciones y consultas rápidas:**")
 col1, col2, col3 = st.columns(3)
 
 if col1.button("📅 ¿Cuándo son las próximas evaluaciones?"):
     prompt_sugerido = f"¿Cuáles son las fechas de las evaluaciones y solemnes programadas para {asignatura_sel}?"
+    st.session_state.selector_alcance = None
+if col2.button("📖 Repasar clase o unidad", key="btn_repasar_clase_unidad"):
+    st.session_state.selector_alcance = "repasar"
+if col3.button("📝 ¡Quiero hacer una prueba!", key="btn_quiero_prueba"):
+    st.session_state.selector_alcance = "prueba"
 
-if cod_materia == "MYF205":
-    if col2.button("🧠 Repasar Forámenes y Pares Craneales"):
-        prompt_sugerido = "Explícame de forma socrática los forámenes de la base del cráneo y qué nervios pasan por ellos."
-    if col3.button("📝 Quiz Rápido de Anatomía (3 preguntas)"):
-        control_pendiente = {"tema": "Anatomía de Cabeza y Cuello", "n_preguntas": 3, "n_pareados": 0}
-else:
-    if col2.button("⚡ Repasar Potencial de Acción"):
-        prompt_sugerido = "Explícame socráticamente las fases del potencial de acción y la apertura de canales de Na+ y K+."
-    if col3.button("📝 Quiz Rápido de Fisiología (3 preguntas)"):
-        control_pendiente = {"tema": "Fisiología de Membrana y Homeostasis", "n_preguntas": 3, "n_pareados": 0}
+# Selector de alcance: aparece al pulsar "Repasar clase o unidad" o "¡Quiero hacer una prueba!" y le da
+# al estudiante la lista de unidades y clases del cronograma para elegir.
+_modo_selector = st.session_state.get("selector_alcance")
+if _modo_selector in ("repasar", "prueba"):
+    _unidades_sel = estructura_unidades(cargar_cronograma(cod_materia))
+    _opciones_sel = {}  # etiqueta -> ("unidad"|"clase", numero, nombre)
+    for _u in _unidades_sel:
+        _ns = [c["n"] for c in _u["clases"]]
+        _etq = ", ".join(str(n) for n in _ns[:-1]) + (" y " if len(_ns) > 1 else "") + str(_ns[-1]) if _ns else ""
+        _opciones_sel[f"📚 Toda la {_u['etiqueta']} (clases {_etq})"] = ("unidad", _u["numero"], _u["etiqueta"])
+        for _c in _u["clases"]:
+            _opciones_sel[f"     Clase {_c['n']} · {_c['nombre']}"] = ("clase", _c["n"], _c["nombre"])
+    _ph_selector = st.empty()
+    with _ph_selector.container(key="cognimorph_selector_alcance"):
+        st.markdown(
+            "**¿De qué clase o unidad quieres "
+            + ("repasar?" if _modo_selector == "repasar" else "hacer la prueba?")
+            + "**"
+        )
+        _eleccion = st.selectbox(
+            "Elige una clase o unidad:", list(_opciones_sel.keys()), index=None,
+            placeholder="Elige una clase o una unidad completa…", key="selector_alcance_valor",
+            label_visibility="collapsed",
+        ) if _opciones_sel else None
+        _c1, _c2 = st.columns([1, 1])
+        _empezar = _c1.button(
+            "✅ Empezar", key="selector_alcance_empezar",
+            disabled=(_eleccion is None and bool(_opciones_sel)),
+        )
+        if _c2.button("✖ Cancelar", key="selector_alcance_cancelar"):
+            st.session_state.selector_alcance = None
+            st.rerun()
+    if _empezar:
+        st.session_state.selector_alcance = None
+        _ph_selector.empty()  # cierra el selector en este mismo turno (antes quedaba visible hasta el siguiente)
+        if _eleccion is None:  # cronograma sin unidades legibles: caminos simples
+            if _modo_selector == "prueba":
+                pedido_prueba_banner = ""
+            else:
+                prompt_sugerido = "Quiero repasar. ¿Qué clase o unidad me recomiendas para partir?"
+        else:
+            _tipo_e, _num_e, _nombre_e = _opciones_sel[_eleccion]
+            if _modo_selector == "prueba":
+                pedido_prueba_banner = f"{'unidad' if _tipo_e == 'unidad' else 'clase'} {_num_e}"
+            elif _tipo_e == "clase":
+                prompt_sugerido = (
+                    f"Quiero repasar la clase {_num_e} ({_nombre_e}). Ayúdame a estudiarla paso a paso."
+                )
+            else:
+                prompt_sugerido = (
+                    f"Quiero repasar la unidad {_num_e}. Ayúdame a estudiarla clase por clase, paso a paso."
+                )
 
 # Historial de Chat
 # Se reinicia el saludo/chat cada vez que cambia la asignatura o el estudiante activo
