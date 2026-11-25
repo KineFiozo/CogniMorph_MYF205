@@ -571,14 +571,16 @@ st.markdown("""
     .ruta-eval-fecha { font-size: 0.7rem; color: #64748B; margin: -3px 0 6px; }
     .ruta-eval-fecha.proxima { color: #C2410C; font-weight: 800; }
     .ruta-evaluaciones { margin-bottom: 14px; }
-    /* cada columna = un bloque: la CAT n arriba y su EPOE abajo */
-    .ruta-par { display: flex; flex-direction: column; gap: 10px; }
+    /* cada fila = un bloque: CAT n, CAT n+3 (EPOE n) y MiniEPOE n */
     .ruta-chips { display: flex; flex-wrap: wrap; gap: 5px; }
     .ruta-chip { font-size: 0.78rem; border-radius: 9px; padding: 4px 11px; color: #334155; background: #E8ECF4; }
-    .ruta-chip.ok { background: #DCFCE7; color: #166534; }
-    .ruta-chip.ahora { background: linear-gradient(135deg, #F97316, #FB923C); color: #fff; }
+    /* evaluación ya realizada: se pinta toda la tarjeta (se entiende que sus clases ya se revisaron) */
+    .ruta-unidad.hecha { background: #DCFCE7; box-shadow: 0 5px 0 #BBF7D0; }
+    .ruta-unidad.hecha .ruta-u-titulo { color: #166534; }
+    .ruta-unidad.hecha .ruta-eval-fecha { color: #3F6F4F; }
+    .ruta-unidad.hecha .ruta-chip { background: rgba(255,255,255,.75); color: #166534; }
     .ruta-grid-eval { grid-template-columns: repeat(3, 1fr); }
-    @media (max-width: 760px) { .ruta-grid-eval { grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); } }
+    @media (max-width: 640px) { .ruta-grid-eval { grid-template-columns: 1fr; } }
 
     /* Asignatura activa */
     .active-subject-badge { background: #FFFFFF !important; border: 2px solid #C7D2FE !important; color: #3730A3 !important;
@@ -1150,7 +1152,6 @@ def ruta_evaluaciones_html(cod_materia):
             return ""
         nombres = {c["n"]: c["nombre"] for u in unidades for c in u["clases"]}
         fechas = _fechas_evaluaciones(cron)
-        fechas_cl = _fechas_clases(cron)
         hoy = date.fromisoformat(_hoy_chile_iso())
 
         items = []  # (orden, evaluacion, clave de fecha, clases)
@@ -1161,12 +1162,15 @@ def ruta_evaluaciones_html(cod_materia):
                 continue  # póster, promedio de controles, etc.: no son de clases
             m_epoe = re.match(r"CAT\s*(\d)\s*\(EPOE\s*(\d)\)", nombre, re.IGNORECASE)
             m_cat = re.match(r"CAT\s*(\d)\s*$", nombre, re.IGNORECASE)
+            m_ej = re.match(r"Ejercicio\s*(\d)", nombre, re.IGNORECASE)
             if m_epoe:
                 orden, clave = int(m_epoe.group(2)) * 10 + 1, f"EPOE{m_epoe.group(2)}"
             elif m_cat:
                 orden, clave = int(m_cat.group(1)) * 10, f"CAT{m_cat.group(1)}"
+            elif m_ej and "miniepoe" in nombre.lower():
+                orden, clave = int(m_ej.group(1)) * 10 + 2, f"EJ{m_ej.group(1)}"
             else:
-                continue  # los MiniEpoe (Ejercicios) no se muestran aquí
+                continue
             items.append((orden, e, clave, clases))
         if not items:
             return ""
@@ -1175,14 +1179,13 @@ def ruta_evaluaciones_html(cod_materia):
         futuras = sorted(fechas[k] for _, _, k, _ in items if k in fechas and fechas[k] >= hoy)
         proxima = futuras[0] if futuras else None
 
-        tarjetas = []
-        pares = {}  # bloque (1, 2, 3) -> tarjetas [CAT n arriba, EPOE n abajo]
+        tarjetas = []  # una fila por bloque: CAT n, CAT n+3 (EPOE n) y MiniEPOE n
         for orden, e, clave, clases in items:
             f = fechas.get(clave)
-            marca, clase_fecha, es_prox = "", "", False
+            marca, clase_fecha, es_prox, es_hecha = "", "", False, False
             if f is not None:
                 if f < hoy:
-                    marca = "✔ "
+                    marca, es_hecha = "✔ ", True
                 elif f == proxima:
                     marca, clase_fecha, es_prox = "▶ ", " proxima", True
                 fecha_txt = f"{f.day} {_MESES_CORTOS[f.month - 1]}"
@@ -1192,23 +1195,21 @@ def ruta_evaluaciones_html(cod_materia):
                 fecha_txt = ""
             pond = f' · {html.escape(str(e["ponderacion"]))}' if e.get("ponderacion") else ""
             # Solo el código de la clase (el nombre completo ya está en la ruta del curso; queda de tooltip)
-            chips = []
-            for n in clases:
-                est, mc = _estado_clase(fechas_cl.get(n), hoy)
-                chips.append(
-                    f'<span class="ruta-chip {est}" title="{html.escape(nombres.get(n, ""))}"><b>{mc}C{n}</b></span>'
-                )
-            filas = '<div class="ruta-chips">' + "".join(chips) + "</div>"
+            filas = '<div class="ruta-chips">' + "".join(
+                f'<span class="ruta-chip" title="{html.escape(nombres.get(n, ""))}"><b>C{n}</b></span>' for n in clases
+            ) + "</div>"
             fecha_html = f'<div class="ruta-eval-fecha{clase_fecha}">{html.escape(fecha_txt)}</div>' if fecha_txt else ""
-            pares.setdefault(orden // 10, []).append(
-                f'<div class="ruta-unidad{" actual" if es_prox else ""}">'
-                f'<div class="ruta-u-titulo">{marca}{html.escape(str(e.get("evaluacion") or ""))}{pond}</div>'
+            titulo = str(e.get("evaluacion") or "")
+            if orden % 10 == 2:  # "Ejercicio 1: MiniEpoe" -> "MiniEPOE 1"
+                titulo = f"MiniEPOE {orden // 10}"
+            tarjetas.append(
+                f'<div class="ruta-unidad{" actual" if es_prox else ""}{" hecha" if es_hecha else ""}">'
+                f'<div class="ruta-u-titulo">{marca}{html.escape(titulo)}{pond}</div>'
                 f'{fecha_html}{filas}</div>'
             )
-        tarjetas = [f'<div class="ruta-par">{"".join(pares[b])}</div>' for b in sorted(pares)]
         return (
             '<div class="ruta-clases ruta-evaluaciones"><div class="ruta-titulo">📝 Rutas de evaluaciones '
-            '<span>qué clases entran en cada una · ✔ ya vista o realizada · ▶ esta semana o la próxima</span></div>'
+            '<span>qué clases entran en cada una · en verde ✔ ya realizada · ▶ la próxima</span></div>'
             f'<div class="ruta-grid ruta-grid-eval">{"".join(tarjetas)}</div></div>'
         )
     except Exception:
@@ -2329,9 +2330,6 @@ mostrar_reproductor_flotante(materiales_disponibles)
 
 # --- ENCABEZADO PRINCIPAL: ruta del curso (el logo de CogniMorph y el de UDLA van en la barra lateral) ---
 mostrar_toasts_pendientes()
-_ruta_html = ruta_clases_html(cod_materia) + ruta_evaluaciones_html(cod_materia)
-if _ruta_html:
-    st.markdown(_ruta_html, unsafe_allow_html=True)
 
 # Barra de Asignatura Activa
 st.markdown(f"""
@@ -2339,6 +2337,10 @@ st.markdown(f"""
     📍 <b>Asignatura activa:</b> {asignatura_sel} • <b>Estudiante:</b> {alumno_activo['nombre']} ({alumno_activo['carrera']})
 </div>
 """, unsafe_allow_html=True)
+
+_ruta_html = ruta_clases_html(cod_materia) + ruta_evaluaciones_html(cod_materia)
+if _ruta_html:
+    st.markdown(_ruta_html, unsafe_allow_html=True)
 
 # ALERTA TEMPRANA ACTIVA EN PANTALLA
 if alumno_activo["riesgo"] == "ALTO":
