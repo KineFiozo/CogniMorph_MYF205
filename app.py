@@ -568,8 +568,9 @@ st.markdown("""
     .ruta-clase { font-size: 0.74rem; line-height: 1.25; border-radius: 9px; padding: 4px 7px; margin-bottom: 4px; color: #475569; background: #F8FAFC; }
     .ruta-clase.ok { background: #DCFCE7; color: #166534; }
     .ruta-clase.ahora { background: linear-gradient(135deg, #F97316, #FB923C); color: #fff; font-weight: 700; }
-    .ruta-eval-fecha { font-size: 0.7rem; color: #64748B; margin: -3px 0 6px; }
+    .ruta-eval-fecha { font-size: 0.7rem; color: #64748B; font-weight: 600; white-space: nowrap; }
     .ruta-eval-fecha.proxima { color: #C2410C; font-weight: 800; }
+    .ruta-eval-cab { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; white-space: nowrap; margin-bottom: 4px; }
     .ruta-evaluaciones { margin-bottom: 14px; }
     /* cada fila = un bloque: CAT n, CAT n+3 (EPOE n) y MiniEPOE n */
     .ruta-chips { display: flex; flex-wrap: wrap; gap: 5px; }
@@ -579,8 +580,24 @@ st.markdown("""
     .ruta-unidad.hecha .ruta-u-titulo { color: #166534; }
     .ruta-unidad.hecha .ruta-eval-fecha { color: #3F6F4F; }
     .ruta-unidad.hecha .ruta-chip { background: rgba(255,255,255,.75); color: #166534; }
-    .ruta-grid-eval { grid-template-columns: repeat(3, 1fr); }
-    @media (max-width: 640px) { .ruta-grid-eval { grid-template-columns: 1fr; } }
+    /* inline-grid + 1fr: las 3 columnas miden lo mismo, ajustadas a la tarjeta con más contenido horizontal */
+    .ruta-grid.ruta-grid-eval { display: inline-grid; grid-template-columns: repeat(3, 1fr); gap: 8px; max-width: 100%; }
+    .ruta-grid-eval .ruta-unidad { padding: 6px 10px 7px; border-radius: 14px; box-shadow: 0 4px 0 #E0E7FF; }
+    .ruta-grid-eval .ruta-unidad.actual { box-shadow: 0 4px 0 #FDBA74; }
+    .ruta-grid-eval .ruta-unidad.hecha { box-shadow: 0 4px 0 #BBF7D0; }
+    .ruta-grid-eval .ruta-chips { gap: 4px; }
+    .ruta-grid-eval .ruta-chip { padding: 2px 9px; font-size: 0.74rem; }
+    @media (max-width: 640px) { .ruta-grid.ruta-grid-eval { display: grid; grid-template-columns: 1fr; } .ruta-eval-cab { white-space: normal; } }
+
+    /* Riesgo del estudiante (solo ?admin=1): la tarjeta cambia de color según el nivel */
+    .riesgo-marca { border-radius: 12px; padding: 7px 10px; font-size: 0.82rem; margin-top: 4px; line-height: 1.3; }
+    .riesgo-marca span { font-size: 0.74rem; opacity: .85; }
+    .riesgo-marca.alto { background: #FEE2E2; color: #991B1B; border: 2px solid #FCA5A5; }
+    .riesgo-marca.medio { background: #FEF3C7; color: #92400E; border: 2px solid #FCD34D; }
+    .riesgo-marca.bajo { background: #DCFCE7; color: #166534; border: 2px solid #86EFAC; }
+    .st-key-card_estudiante:has(.riesgo-marca.alto) { background: #FFF1F2 !important; box-shadow: 0 6px 0 #FECACA !important; }
+    .st-key-card_estudiante:has(.riesgo-marca.medio) { background: #FFFBEB !important; box-shadow: 0 6px 0 #FDE68A !important; }
+    .st-key-card_estudiante:has(.riesgo-marca.bajo) { background: #F0FDF4 !important; box-shadow: 0 6px 0 #BBF7D0 !important; }
 
     /* Asignatura activa */
     .active-subject-badge { background: #FFFFFF !important; border: 2px solid #C7D2FE !important; color: #3730A3 !important;
@@ -1198,14 +1215,14 @@ def ruta_evaluaciones_html(cod_materia):
             filas = '<div class="ruta-chips">' + "".join(
                 f'<span class="ruta-chip" title="{html.escape(nombres.get(n, ""))}"><b>C{n}</b></span>' for n in clases
             ) + "</div>"
-            fecha_html = f'<div class="ruta-eval-fecha{clase_fecha}">{html.escape(fecha_txt)}</div>' if fecha_txt else ""
+            fecha_html = f'<span class="ruta-eval-fecha{clase_fecha}">{html.escape(fecha_txt)}</span>' if fecha_txt else ""
             titulo = str(e.get("evaluacion") or "")
             if orden % 10 == 2:  # "Ejercicio 1: MiniEpoe" -> "MiniEPOE 1"
                 titulo = f"MiniEPOE {orden // 10}"
             tarjetas.append(
                 f'<div class="ruta-unidad{" actual" if es_prox else ""}{" hecha" if es_hecha else ""}">'
-                f'<div class="ruta-u-titulo">{marca}{html.escape(titulo)}{pond}</div>'
-                f'{fecha_html}{filas}</div>'
+                f'<div class="ruta-u-titulo ruta-eval-cab"><span>{marca}{html.escape(titulo)}{pond}</span>{fecha_html}</div>'
+                f'{filas}</div>'
             )
         return (
             '<div class="ruta-clases ruta-evaluaciones"><div class="ruta-titulo">📝 Rutas de evaluaciones '
@@ -2301,10 +2318,30 @@ with st.sidebar:
     with st.container(key="card_estudiante"):
         st.markdown('<div class="sidebar-card-title">👤 Estudiante (Blackboard SSO)</div>', unsafe_allow_html=True)
         alumnos_lista = cargar_estudiantes(cod_materia)
-        opciones_alumnos = {f"{a['nombre']} ({a['carrera']} - Riesgo {a['riesgo']})": a for a in alumnos_lista}
+        # El riesgo y el promedio previo son información INTERNA: el estudiante no los ve. Solo el profesor,
+        # abriendo la app con ?admin=1, ve el nivel de riesgo (la tarjeta cambia de color según el nivel).
+        if _es_admin:
+            opciones_alumnos = {f"{a['nombre']} ({a['carrera']} - Riesgo {a['riesgo']})": a for a in alumnos_lista}
+        else:
+            opciones_alumnos = {f"{a['nombre']} ({a['carrera']})": a for a in alumnos_lista}
         opcion_elegida = st.selectbox("Simular ingreso de estudiante:", list(opciones_alumnos.keys()))
         alumno_activo = opciones_alumnos[opcion_elegida]
-        st.caption(f"🆔 ID: {alumno_activo['id']} | Promedio previo: **{alumno_activo['promedio_previo']}**")
+        if _es_admin:
+            _r = str(alumno_activo.get("riesgo") or "").upper()
+            _clase_r = {"ALTO": "alto", "MEDIO": "medio", "BAJO": "bajo"}.get(_r, "")
+            _icono_r = {"alto": "🔴", "medio": "🟡", "bajo": "🟢"}.get(_clase_r, "⚪")
+            st.caption(f"🆔 ID: {alumno_activo['id']} | Promedio previo: **{alumno_activo['promedio_previo']}**")
+            tema = alumno_activo.get("tema_debil")
+            st.markdown(
+                f'<div class="riesgo-marca {_clase_r}">{_icono_r} <b>Riesgo {html.escape(_r or "sin dato")}</b> · uso interno'
+                + (f'<br><b>🚨 Plan de reforzamiento activo:</b><br><span>{html.escape(str(tema))}</span>'
+                   if tema and str(tema) != "Ninguno" and _r in ("ALTO", "MEDIO")
+                   else '<br><span>Sin plan de reforzamiento</span>')
+                + '</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.caption(f"🆔 ID: {alumno_activo['id']}")
     st.session_state.alumno_id_activo = alumno_activo["id"]
     dibujar_panel_gamificacion(panel_gamificacion)  # dibujo inicial; se vuelve a dibujar al final del script
 
@@ -2342,15 +2379,7 @@ _ruta_html = ruta_clases_html(cod_materia) + ruta_evaluaciones_html(cod_materia)
 if _ruta_html:
     st.markdown(_ruta_html, unsafe_allow_html=True)
 
-# ALERTA TEMPRANA ACTIVA EN PANTALLA
-if alumno_activo["riesgo"] == "ALTO":
-    st.markdown(f"""
-    <div class="alert-card-riesgo">
-        🚨 <b>Plan de Reforzamiento Activo (Alerta Temprana):</b><br>
-        Hola {alumno_activo['nombre']}, detectamos que necesitas reforzar: <b>{alumno_activo['tema_debil']}</b>. 
-        ¡Pregúntale a CogniMorph para repasar antes de la próxima evaluación!
-    </div>
-    """, unsafe_allow_html=True)
+# (La alerta temprana ya no se muestra en pantalla: el riesgo es información interna; ver la tarjeta de estudiante de la barra lateral con ?admin=1.)
 
 prompt_sugerido = None
 # control_pendiente reemplaza el viejo enfoque de "pedirle el control al tutor conversacional":
