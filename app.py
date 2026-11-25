@@ -571,7 +571,8 @@ st.markdown("""
     .ruta-eval-fecha { font-size: 0.7rem; color: #64748B; margin: -3px 0 6px; }
     .ruta-eval-fecha.proxima { color: #C2410C; font-weight: 800; }
     .ruta-evaluaciones { margin-bottom: 14px; }
-    /* cada fila = un bloque: CAT n, EPOE n y MiniEpoe n */
+    /* cada columna = un bloque: la CAT n arriba y su EPOE abajo */
+    .ruta-par { display: flex; flex-direction: column; gap: 10px; }
     .ruta-grid-eval { grid-template-columns: repeat(3, 1fr); }
     @media (max-width: 760px) { .ruta-grid-eval { grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); } }
 
@@ -1120,7 +1121,7 @@ def _fechas_evaluaciones(cron):
 
 def ruta_evaluaciones_html(cod_materia):
     """
-    "Rutas de evaluaciones": qué clases entran en cada evaluación (CAT, EPOE y MiniEpoe), en el mismo formato
+    "Rutas de evaluaciones": qué clases entran en cada evaluación (cada CAT con su EPOE debajo), en el mismo formato
     que la ruta del curso. Sale de contenidos_evaluaciones.json (las clases) y del cronograma (las fechas):
     ✔ ya realizada, ▶ la próxima. Si la asignatura no tiene contenidos_evaluaciones.json, no se muestra.
     """
@@ -1142,15 +1143,12 @@ def ruta_evaluaciones_html(cod_materia):
                 continue  # póster, promedio de controles, etc.: no son de clases
             m_epoe = re.match(r"CAT\s*(\d)\s*\(EPOE\s*(\d)\)", nombre, re.IGNORECASE)
             m_cat = re.match(r"CAT\s*(\d)\s*$", nombre, re.IGNORECASE)
-            m_ej = re.match(r"Ejercicio\s*(\d)", nombre, re.IGNORECASE)
             if m_epoe:
                 orden, clave = int(m_epoe.group(2)) * 10 + 1, f"EPOE{m_epoe.group(2)}"
             elif m_cat:
                 orden, clave = int(m_cat.group(1)) * 10, f"CAT{m_cat.group(1)}"
-            elif m_ej:
-                orden, clave = int(m_ej.group(1)) * 10 + 2, f"EJ{m_ej.group(1)}"
             else:
-                orden, clave = 99, None
+                continue  # los MiniEpoe (Ejercicios) no se muestran aquí
             items.append((orden, e, clave, clases))
         if not items:
             return ""
@@ -1160,7 +1158,8 @@ def ruta_evaluaciones_html(cod_materia):
         proxima = futuras[0] if futuras else None
 
         tarjetas = []
-        for _, e, clave, clases in items:
+        pares = {}  # bloque (1, 2, 3) -> tarjetas [CAT n arriba, EPOE n abajo]
+        for orden, e, clave, clases in items:
             f = fechas.get(clave)
             marca, clase_fecha, es_prox = "", "", False
             if f is not None:
@@ -1178,11 +1177,12 @@ def ruta_evaluaciones_html(cod_materia):
                 f'<div class="ruta-clase prox"><b>C{n}</b> {html.escape(nombres.get(n, ""))}</div>' for n in clases
             )
             fecha_html = f'<div class="ruta-eval-fecha{clase_fecha}">{html.escape(fecha_txt)}</div>' if fecha_txt else ""
-            tarjetas.append(
+            pares.setdefault(orden // 10, []).append(
                 f'<div class="ruta-unidad{" actual" if es_prox else ""}">'
                 f'<div class="ruta-u-titulo">{marca}{html.escape(str(e.get("evaluacion") or ""))}{pond}</div>'
                 f'{fecha_html}{filas}</div>'
             )
+        tarjetas = [f'<div class="ruta-par">{"".join(pares[b])}</div>' for b in sorted(pares)]
         return (
             '<div class="ruta-clases ruta-evaluaciones"><div class="ruta-titulo">📝 Rutas de evaluaciones '
             '<span>qué clases entran en cada una · ✔ ya realizada · ▶ la próxima</span></div>'
