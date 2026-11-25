@@ -8,7 +8,18 @@
     "fuente_original": "Cronograma_MYF205_202620.pdf",
     "advertencias": [
       "El día 6 dice 'EPEOE 1' en el documento original, distinto de 'EPOE 2'/'EPOE 3' de otras semanas. Revisado con el docente: se mantiene tal cual (no se corrige)."
-    ]
+    ],
+    "sinonimos_clases": {
+      "5": [
+        "Miología de Cabeza",
+        "SMAS"
+      ],
+      "9": [
+        "Límites, fascias, Osteología, artrología y miología cervical",
+        "Osteología, artrología y miología cervical",
+        "Osteoartrología y miología cervical"
+      ]
+    }
   },
   "dias": [
     {
@@ -65,7 +76,7 @@
       "fecha": "31-08-2026",
       "catedra": {
         "actividad": null,
-        "contenido": "U3:C5: Miología de Cabeza"
+        "contenido": "U3:C5: Músculos masticatorios y sistema musculoaponeurótico superficial"
       },
       "taller": {
         "actividad": null,
@@ -126,7 +137,7 @@
       "fecha": "05-10-2026",
       "catedra": {
         "actividad": "Clase",
-        "contenido": "U5:C9: Límites, fascias Osteología, artrología y miología cervical"
+        "contenido": "U5:C9: Osteoartromiología cervical"
       },
       "taller": {
         "actividad": "Taller",
