@@ -573,6 +573,10 @@ st.markdown("""
     .ruta-evaluaciones { margin-bottom: 14px; }
     /* cada columna = un bloque: la CAT n arriba y su EPOE abajo */
     .ruta-par { display: flex; flex-direction: column; gap: 10px; }
+    .ruta-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+    .ruta-chip { font-size: 0.78rem; border-radius: 9px; padding: 4px 11px; color: #334155; background: #E8ECF4; }
+    .ruta-chip.ok { background: #DCFCE7; color: #166534; }
+    .ruta-chip.ahora { background: linear-gradient(135deg, #F97316, #FB923C); color: #fff; }
     .ruta-grid-eval { grid-template-columns: repeat(3, 1fr); }
     @media (max-width: 760px) { .ruta-grid-eval { grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); } }
 
@@ -1043,6 +1047,29 @@ def dibujar_panel_gamificacion(contenedor):
             )
 
 
+def _fechas_clases(cron):
+    """{n de clase: fecha de la cátedra} según el cronograma (formato MYF205 con 'dias'; si no hay fechas, vacío)."""
+    fechas = {}
+    for d in (cron.get("dias") or []) if isinstance(cron, dict) else []:
+        cont = ((d.get("catedra") or {}).get("contenido")) or ""
+        m = re.search(r"C\s*(\d+)\s*[:.]", cont)
+        f = re.match(r"(\d{2})-(\d{2})-(\d{4})", d.get("fecha") or "")
+        if m and f:
+            fechas[int(m.group(1))] = date(int(f.group(3)), int(f.group(2)), int(f.group(1)))
+    return fechas
+
+
+def _estado_clase(fecha, hoy):
+    """('ok', '✔ ') si ya pasó la semana de la clase, ('ahora', '▶ ') si es esta semana, ('prox', '') si viene después."""
+    if fecha is None:
+        return "prox", ""
+    if hoy >= fecha + timedelta(days=7):
+        return "ok", "✔ "
+    if hoy >= fecha:
+        return "ahora", "▶ "
+    return "prox", ""
+
+
 def ruta_clases_html(cod_materia):
     """
     "Ruta del curso": TODAS las clases agrupadas por unidad, para que el estudiante tenga siempre a la vista
@@ -1055,25 +1082,15 @@ def ruta_clases_html(cod_materia):
         unidades = estructura_unidades(cron)
         if not unidades:
             return ""
-        fechas = {}
-        for d in (cron.get("dias") or []) if isinstance(cron, dict) else []:
-            cont = ((d.get("catedra") or {}).get("contenido")) or ""
-            m = re.search(r"C\s*(\d+)\s*[:.]", cont)
-            f = re.match(r"(\d{2})-(\d{2})-(\d{4})", d.get("fecha") or "")
-            if m and f:
-                fechas[int(m.group(1))] = date(int(f.group(3)), int(f.group(2)), int(f.group(1)))
+        fechas = _fechas_clases(cron)
         hoy = date.fromisoformat(_hoy_chile_iso())
         tarjetas = []
         for u in unidades:
             filas, es_actual = [], False
             for c in u["clases"]:
-                f = fechas.get(c["n"])
-                estado, marca = "prox", ""
-                if f is not None:
-                    if hoy >= f + timedelta(days=7):
-                        estado, marca = "ok", "✔ "
-                    elif hoy >= f:
-                        estado, marca, es_actual = "ahora", "▶ ", True
+                estado, marca = _estado_clase(fechas.get(c["n"]), hoy)
+                if estado == "ahora":
+                    es_actual = True
                 nombre = c["nombre"]
                 filas.append(
                     f'<div class="ruta-clase {estado}"><b>{marca}C{c["n"]}</b> {html.escape(nombre)}</div>'
@@ -1133,6 +1150,7 @@ def ruta_evaluaciones_html(cod_materia):
             return ""
         nombres = {c["n"]: c["nombre"] for u in unidades for c in u["clases"]}
         fechas = _fechas_evaluaciones(cron)
+        fechas_cl = _fechas_clases(cron)
         hoy = date.fromisoformat(_hoy_chile_iso())
 
         items = []  # (orden, evaluacion, clave de fecha, clases)
@@ -1173,9 +1191,14 @@ def ruta_evaluaciones_html(cod_materia):
             else:
                 fecha_txt = ""
             pond = f' · {html.escape(str(e["ponderacion"]))}' if e.get("ponderacion") else ""
-            filas = "".join(
-                f'<div class="ruta-clase prox"><b>C{n}</b> {html.escape(nombres.get(n, ""))}</div>' for n in clases
-            )
+            # Solo el código de la clase (el nombre completo ya está en la ruta del curso; queda de tooltip)
+            chips = []
+            for n in clases:
+                est, mc = _estado_clase(fechas_cl.get(n), hoy)
+                chips.append(
+                    f'<span class="ruta-chip {est}" title="{html.escape(nombres.get(n, ""))}"><b>{mc}C{n}</b></span>'
+                )
+            filas = '<div class="ruta-chips">' + "".join(chips) + "</div>"
             fecha_html = f'<div class="ruta-eval-fecha{clase_fecha}">{html.escape(fecha_txt)}</div>' if fecha_txt else ""
             pares.setdefault(orden // 10, []).append(
                 f'<div class="ruta-unidad{" actual" if es_prox else ""}">'
@@ -1185,7 +1208,7 @@ def ruta_evaluaciones_html(cod_materia):
         tarjetas = [f'<div class="ruta-par">{"".join(pares[b])}</div>' for b in sorted(pares)]
         return (
             '<div class="ruta-clases ruta-evaluaciones"><div class="ruta-titulo">📝 Rutas de evaluaciones '
-            '<span>qué clases entran en cada una · ✔ ya realizada · ▶ la próxima</span></div>'
+            '<span>qué clases entran en cada una · ✔ ya vista o realizada · ▶ esta semana o la próxima</span></div>'
             f'<div class="ruta-grid ruta-grid-eval">{"".join(tarjetas)}</div></div>'
         )
     except Exception:
