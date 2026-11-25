@@ -568,6 +568,12 @@ st.markdown("""
     .ruta-clase { font-size: 0.74rem; line-height: 1.25; border-radius: 9px; padding: 4px 7px; margin-bottom: 4px; color: #475569; background: #F8FAFC; }
     .ruta-clase.ok { background: #DCFCE7; color: #166534; }
     .ruta-clase.ahora { background: linear-gradient(135deg, #F97316, #FB923C); color: #fff; font-weight: 700; }
+    .ruta-eval-fecha { font-size: 0.7rem; color: #64748B; margin: -3px 0 6px; }
+    .ruta-eval-fecha.proxima { color: #C2410C; font-weight: 800; }
+    .ruta-evaluaciones { margin-bottom: 14px; }
+    /* cada fila = un bloque: CAT n, EPOE n y MiniEpoe n */
+    .ruta-grid-eval { grid-template-columns: repeat(3, 1fr); }
+    @media (max-width: 760px) { .ruta-grid-eval { grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); } }
 
     /* Asignatura activa */
     .active-subject-badge { background: #FFFFFF !important; border: 2px solid #C7D2FE !important; color: #3730A3 !important;
@@ -1068,9 +1074,8 @@ def ruta_clases_html(cod_materia):
                     elif hoy >= f:
                         estado, marca, es_actual = "ahora", "▶ ", True
                 nombre = c["nombre"]
-                corto = (nombre[:38] + "…") if len(nombre) > 39 else nombre
                 filas.append(
-                    f'<div class="ruta-clase {estado}"><b>{marca}C{c["n"]}</b> {html.escape(corto)}</div>'
+                    f'<div class="ruta-clase {estado}"><b>{marca}C{c["n"]}</b> {html.escape(nombre)}</div>'
                 )
             tarjetas.append(
                 f'<div class="ruta-unidad{" actual" if es_actual else ""}">'
@@ -1080,6 +1085,108 @@ def ruta_clases_html(cod_materia):
             '<div class="ruta-clases"><div class="ruta-titulo">🧭 Ruta del curso '
             '<span>según el calendario · ✔ ya vista · ▶ esta semana</span></div>'
             f'<div class="ruta-grid">{"".join(tarjetas)}</div></div>'
+        )
+    except Exception:
+        return ""
+
+_MESES_CORTOS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"]
+
+
+def _fechas_evaluaciones(cron):
+    """
+    Fecha de cada evaluación según el cronograma: {'CAT1': date, 'EPOE1': date, 'EJ1': date, ...}.
+    Solo cuenta las filas que son la evaluación misma ("CÁTEDRA 1", "EPOE 1", hito "EJ1: ..."), no los
+    repasos ("Repaso e integración EPOE 3").
+    """
+    out = {}
+    for d in (cron.get("dias") or []) if isinstance(cron, dict) else []:
+        f = re.match(r"(\d{2})-(\d{2})-(\d{4})", d.get("fecha") or "")
+        if not f:
+            continue
+        fecha = date(int(f.group(3)), int(f.group(2)), int(f.group(1)))
+        cat = ((d.get("catedra") or {}).get("contenido")) or ""
+        tal = d.get("taller") or {}
+        m = re.match(r"^\s*C[ÁA]TEDRA\s*(\d)\s*$", cat.upper())
+        if m:
+            out[f"CAT{m.group(1)}"] = fecha
+        m = re.match(r"^\s*EPOE\s*(\d)\s*$", (tal.get("contenido") or "").upper())
+        if m:
+            out[f"EPOE{m.group(1)}"] = fecha
+        m = re.match(r"^\s*EJ\s*(\d)\s*:", tal.get("hito") or "", re.IGNORECASE)
+        if m:
+            out[f"EJ{m.group(1)}"] = fecha
+    return out
+
+
+def ruta_evaluaciones_html(cod_materia):
+    """
+    "Rutas de evaluaciones": qué clases entran en cada evaluación (CAT, EPOE y MiniEpoe), en el mismo formato
+    que la ruta del curso. Sale de contenidos_evaluaciones.json (las clases) y del cronograma (las fechas):
+    ✔ ya realizada, ▶ la próxima. Si la asignatura no tiene contenidos_evaluaciones.json, no se muestra.
+    """
+    try:
+        evaluaciones = cargar_contenidos_evaluaciones(cod_materia)
+        cron = cargar_cronograma(cod_materia)
+        unidades = estructura_unidades(cron)
+        if not evaluaciones or not unidades:
+            return ""
+        nombres = {c["n"]: c["nombre"] for u in unidades for c in u["clases"]}
+        fechas = _fechas_evaluaciones(cron)
+        hoy = date.fromisoformat(_hoy_chile_iso())
+
+        items = []  # (orden, evaluacion, clave de fecha, clases)
+        for e in evaluaciones:
+            nombre = str(e.get("evaluacion") or "")
+            clases = clases_de_evaluacion(e, unidades)
+            if not clases:
+                continue  # póster, promedio de controles, etc.: no son de clases
+            m_epoe = re.match(r"CAT\s*(\d)\s*\(EPOE\s*(\d)\)", nombre, re.IGNORECASE)
+            m_cat = re.match(r"CAT\s*(\d)\s*$", nombre, re.IGNORECASE)
+            m_ej = re.match(r"Ejercicio\s*(\d)", nombre, re.IGNORECASE)
+            if m_epoe:
+                orden, clave = int(m_epoe.group(2)) * 10 + 1, f"EPOE{m_epoe.group(2)}"
+            elif m_cat:
+                orden, clave = int(m_cat.group(1)) * 10, f"CAT{m_cat.group(1)}"
+            elif m_ej:
+                orden, clave = int(m_ej.group(1)) * 10 + 2, f"EJ{m_ej.group(1)}"
+            else:
+                orden, clave = 99, None
+            items.append((orden, e, clave, clases))
+        if not items:
+            return ""
+        items.sort(key=lambda x: x[0])
+
+        futuras = sorted(fechas[k] for _, _, k, _ in items if k in fechas and fechas[k] >= hoy)
+        proxima = futuras[0] if futuras else None
+
+        tarjetas = []
+        for _, e, clave, clases in items:
+            f = fechas.get(clave)
+            marca, clase_fecha, es_prox = "", "", False
+            if f is not None:
+                if f < hoy:
+                    marca = "✔ "
+                elif f == proxima:
+                    marca, clase_fecha, es_prox = "▶ ", " proxima", True
+                fecha_txt = f"{f.day} {_MESES_CORTOS[f.month - 1]}"
+                if es_prox:
+                    fecha_txt = f"Próxima · {fecha_txt}"
+            else:
+                fecha_txt = ""
+            pond = f' · {html.escape(str(e["ponderacion"]))}' if e.get("ponderacion") else ""
+            filas = "".join(
+                f'<div class="ruta-clase prox"><b>C{n}</b> {html.escape(nombres.get(n, ""))}</div>' for n in clases
+            )
+            fecha_html = f'<div class="ruta-eval-fecha{clase_fecha}">{html.escape(fecha_txt)}</div>' if fecha_txt else ""
+            tarjetas.append(
+                f'<div class="ruta-unidad{" actual" if es_prox else ""}">'
+                f'<div class="ruta-u-titulo">{marca}{html.escape(str(e.get("evaluacion") or ""))}{pond}</div>'
+                f'{fecha_html}{filas}</div>'
+            )
+        return (
+            '<div class="ruta-clases ruta-evaluaciones"><div class="ruta-titulo">📝 Rutas de evaluaciones '
+            '<span>qué clases entran en cada una · ✔ ya realizada · ▶ la próxima</span></div>'
+            f'<div class="ruta-grid ruta-grid-eval">{"".join(tarjetas)}</div></div>'
         )
     except Exception:
         return ""
@@ -2199,7 +2306,7 @@ mostrar_reproductor_flotante(materiales_disponibles)
 
 # --- ENCABEZADO PRINCIPAL: ruta del curso (el logo de CogniMorph y el de UDLA van en la barra lateral) ---
 mostrar_toasts_pendientes()
-_ruta_html = ruta_clases_html(cod_materia)
+_ruta_html = ruta_clases_html(cod_materia) + ruta_evaluaciones_html(cod_materia)
 if _ruta_html:
     st.markdown(_ruta_html, unsafe_allow_html=True)
 
